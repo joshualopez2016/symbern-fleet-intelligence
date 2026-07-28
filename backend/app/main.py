@@ -794,6 +794,21 @@ def _production_where(product, part_number, serial, date_from, date_to,
     return (("WHERE " + " AND ".join(where)) if where else ""), params
 
 
+@app.get("/api/production/filter-options")
+def production_filter_options(_user: dict = Depends(auth.require_user)) -> dict:
+    """Distinct values for the production filter dropdowns."""
+    def distinct(col):
+        return [r[col] for r in query(f"SELECT DISTINCT {col} FROM test_records ORDER BY {col}")]
+    return {
+        "products": distinct("product"),
+        "part_numbers": distinct("part_number"),
+        "stations": distinct("station"),
+        "fixtures": distinct("fixture"),
+        "operators": distinct("operator"),
+        "test_parameters": distinct("test_parameter"),
+    }
+
+
 @app.get("/api/production/records")
 def production_records(
     product: Optional[str] = None,

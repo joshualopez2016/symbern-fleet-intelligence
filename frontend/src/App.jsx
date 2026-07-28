@@ -10,6 +10,7 @@ import DailyReport from './components/DailyReport'
 import FilterPanel from './components/FilterPanel'
 import QueryBuilder from './components/QueryBuilder'
 import UserAdmin from './components/UserAdmin'
+import Production from './components/Production'
 import Login from './components/Login'
 
 const POLL_MS = 3000
@@ -65,6 +66,7 @@ function Dashboard({ user, onLogout }) {
   const [showReport, setShowReport] = useState(false)
   const [showQuery, setShowQuery] = useState(false)
   const [showUsers, setShowUsers] = useState(false)
+  const [view, setView] = useState('fleet')
   const isAdmin = user.role === 'administrator'
   const canWriteNotes = ['engineer', 'supervisor', 'administrator'].includes(user.role)
   const [filters, setFilters] = useState(DEFAULT_FILTERS)
@@ -160,6 +162,10 @@ function Dashboard({ user, onLogout }) {
             <p className="subtitle">Turning fleet data into live decisions</p>
           </div>
         </div>
+        <div className="mode-switch">
+          <button className={view === 'fleet' ? 'active' : ''} onClick={() => setView('fleet')}>Fleet</button>
+          <button className={view === 'production' ? 'active' : ''} onClick={() => setView('production')}>Production</button>
+        </div>
         <div className="topbar-status">
           {wsConnected ? (
             <span className="conn conn-live">⚡ Realtime</span>
@@ -183,6 +189,7 @@ function Dashboard({ user, onLogout }) {
         </div>
       )}
 
+      {view === 'fleet' && (<>
       <section className="summary">
         {['all', 'critical', 'warning', 'ok'].map((s) => (
           <button
@@ -262,6 +269,9 @@ function Dashboard({ user, onLogout }) {
           </div>
         )}
       </main>
+      </>)}
+
+      {view === 'production' && <Production />}
 
       {selected && (
         <DeviceDetail deviceId={selected} canWriteNotes={canWriteNotes} onClose={() => setSelected(null)} />

@@ -206,6 +206,34 @@ export function deleteUser(id) {
   return sendJSON('DELETE', `/api/users/${id}`)
 }
 
+// --- production test records ---
+function qstr(params) {
+  const p = new URLSearchParams()
+  for (const [k, v] of Object.entries(params || {})) {
+    if (v !== undefined && v !== null && v !== '') p.set(k, v)
+  }
+  const s = p.toString()
+  return s ? `?${s}` : ''
+}
+export function productionRecords(params) {
+  return getJSON(`/api/production/records${qstr(params)}`)
+}
+export function productionSummary(date) {
+  return getJSON(`/api/production/summary${date ? `?date=${encodeURIComponent(date)}` : ''}`)
+}
+export function productionSerial(serial) {
+  return getJSON(`/api/production/serial/${encodeURIComponent(serial)}`)
+}
+export function productionSearch(q) {
+  return getJSON(`/api/production/search?q=${encodeURIComponent(q)}`)
+}
+export function productionFilterOptions() {
+  return getJSON('/api/production/filter-options')
+}
+export function exportProduction(fmt, params) {
+  return downloadFile(`/api/export/production.${fmt}${qstr(params)}`, `test_records.${fmt}`)
+}
+
 // --- query builder ---
 export function querySources() {
   return getJSON('/api/query/sources')
