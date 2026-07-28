@@ -16,7 +16,8 @@ export default defineConfig({
   server: {
     port: 5173,
     proxy: {
-      '/api': 'http://127.0.0.1:8000',
+      // ws: true so the /api/ws WebSocket is proxied to FastAPI too
+      '/api': { target: 'http://127.0.0.1:8000', ws: true },
     },
   },
 })

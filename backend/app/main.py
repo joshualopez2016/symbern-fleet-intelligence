@@ -13,11 +13,15 @@ Every query is parameterized (%s). Responses are JSON only.
 """
 from __future__ import annotations
 
+import asyncio
+import json
 from contextlib import asynccontextmanager
-from datetime import datetime
+from datetime import date, datetime
 from typing import Optional
 
-from fastapi import Depends, FastAPI, HTTPException, Query, Response
+from fastapi import (
+    Depends, FastAPI, HTTPException, Query, Response, WebSocket, WebSocketDisconnect,
+)
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
@@ -41,7 +45,9 @@ VALID_SEVERITY = {"info", "warning", "critical"}
 async def lifespan(app: FastAPI):
     pool.open()
     ro_pool.open()
+    broadcaster = asyncio.create_task(_broadcaster())
     yield
+    broadcaster.cancel()
     pool.close()
     ro_pool.close()
 
@@ -61,6 +67,104 @@ app.add_middleware(
 def health() -> dict:
     row = query_one("SELECT 1 AS ok")
     return {"status": "ok" if row and row["ok"] == 1 else "degraded"}
+
+
+# ---- WebSocket realtime ----------------------------------------------------
+# One shared broadcaster does a single DB read per tick and pushes it to ALL
+# connected clients — cheaper than N clients each polling over HTTP.
+
+def _json_default(o):
+    if isinstance(o, (datetime, date)):
+        return o.isoformat()
+    return str(o)
+
+
+class WSManager:
+    def __init__(self):
+        self.active: set[WebSocket] = set()
+        self.lock = asyncio.Lock()
+
+    async def connect(self, ws: WebSocket):
+        await ws.accept()
+        async with self.lock:
+            self.active.add(ws)
+
+    async def disconnect(self, ws: WebSocket):
+        async with self.lock:
+            self.active.discard(ws)
+
+    async def broadcast(self, message: dict):
+        data = json.dumps(message, default=_json_default)
+        async with self.lock:
+            targets = list(self.active)
+        for ws in targets:
+            try:
+                await ws.send_text(data)
+            except Exception:
+                await self.disconnect(ws)
+
+    def count(self) -> int:
+        return len(self.active)
+
+
+ws_manager = WSManager()
+
+
+def _fleet_snapshot() -> dict:
+    summary = query_one(
+        """
+        SELECT count(*) AS total,
+               count(*) FILTER (WHERE status = 'ok')       AS ok,
+               count(*) FILTER (WHERE status = 'warning')  AS warning,
+               count(*) FILTER (WHERE status = 'critical') AS critical,
+               COALESCE(sum(active_alarms), 0)             AS active_alarms
+        FROM device_status
+        """
+    )
+    devices = query(
+        """
+        SELECT s.device_id, d.label, d.model, d.site,
+               s.soc, s.pack_voltage, s.current_a, s.temperature_c,
+               s.status, s.active_alarms, s.ts
+        FROM device_status s JOIN devices d USING (device_id)
+        ORDER BY CASE s.status WHEN 'critical' THEN 0 WHEN 'warning' THEN 1 ELSE 2 END,
+                 s.soc ASC
+        """
+    )
+    return {"type": "snapshot", "summary": summary, "devices": devices}
+
+
+async def _broadcaster():
+    """Push a fleet snapshot to all clients ~every 2s (only when someone listens)."""
+    while True:
+        try:
+            if ws_manager.count():
+                snap = await asyncio.to_thread(_fleet_snapshot)
+                await ws_manager.broadcast(snap)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            pass
+        await asyncio.sleep(2.0)
+
+
+@app.websocket("/api/ws")
+async def fleet_ws(websocket: WebSocket, token: str = ""):
+    """Realtime fleet feed. Auth via ?token=<jwt>."""
+    user = auth.user_from_token(token)
+    if not user:
+        await websocket.close(code=1008)  # policy violation
+        return
+    await ws_manager.connect(websocket)
+    try:
+        snap = await asyncio.to_thread(_fleet_snapshot)  # immediate first paint
+        await websocket.send_text(json.dumps(snap, default=_json_default))
+        while True:
+            await websocket.receive_text()  # keep-alive; client messages ignored
+    except WebSocketDisconnect:
+        await ws_manager.disconnect(websocket)
+    except Exception:
+        await ws_manager.disconnect(websocket)
 
 
 # ---- Authentication --------------------------------------------------------

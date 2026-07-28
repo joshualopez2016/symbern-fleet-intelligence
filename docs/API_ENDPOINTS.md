@@ -141,6 +141,18 @@ All require auth; every note is scoped to the authenticated user.
 - **PUT /api/notes/{note_id}** — body `{ "body": "…" }` → updated note. `404` if not the user's note.
 - **DELETE /api/notes/{note_id}** → `{ "deleted": <id> }`. `404` if not the user's note.
 
+## WebSocket — realtime fleet feed
+**WS /api/ws?token=&lt;jwt&gt;** — authenticated WebSocket. On connect the server sends
+an immediate snapshot, then pushes one ~every 2s:
+```json
+{ "type": "snapshot", "summary": { total, ok, warning, critical, active_alarms },
+  "devices": [ { device_id, label, soc, pack_voltage, status, ... } ] }
+```
+A single server-side broadcaster does one DB read per tick and fans it out to all
+clients (cheaper than N clients polling). The UI uses it for the default live view
+and shows a "⚡ Realtime" badge; it falls back to HTTP polling when filters/search/
+pagination are active. Invalid/missing token → close code 1008.
+
 ## Reporting & export
 Require auth.
 

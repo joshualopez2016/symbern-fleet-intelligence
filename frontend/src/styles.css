@@ -93,6 +93,7 @@ body {
 .conn { font-size: 13px; font-weight: 600; }
 .conn-ok { color: var(--ok); }
 .conn-bad { color: var(--crit); }
+.conn-live { color: var(--accent); animation: pulse 1.6s ease-in-out infinite; }
 .updated { color: var(--muted); font-size: 12px; }
 
 /* Banner */

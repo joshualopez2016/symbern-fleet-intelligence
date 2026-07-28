@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { fetchFleet, fetchFleetSummary, fetchMe, logout, getAuthToken, aiStatus, exportFleet, fetchFilterOptions } from './api'
 import { usePolling } from './usePolling'
+import { useFleetSocket } from './useFleetSocket'
 import FleetGrid from './components/FleetGrid'
 import DeviceDetail from './components/DeviceDetail'
 import AlertsPanel from './components/AlertsPanel'
@@ -110,19 +111,35 @@ function Dashboard({ user, onLogout }) {
     refreshSummary()
   }
 
-  const devices = fleet?.devices ?? []
-  const gridDevices = aiResult ? aiResult.devices : devices
-  const matched = fleet?.total ?? 0
+  // Realtime feed. Drives the default view; HTTP takes over when the user
+  // filters/searches/paginates (which the pushed snapshot doesn't scope).
+  const { connected: wsConnected, snapshot: wsSnap } = useFleetSocket(true)
+
+  const hasAdvancedFilters =
+    filters.sites.length || filters.companies.length || filters.equipment.length ||
+    filters.socMin !== '' || filters.socMax !== '' || filters.hasAlarms
+  const isDefaultView =
+    statusFilter === 'all' && !debouncedSearch && offset === 0 && !aiResult && !hasAdvancedFilters
+  const useLive = wsConnected && !!wsSnap && isDefaultView
+
+  const liveSummary = wsConnected && wsSnap ? wsSnap.summary : summary
+  const effectiveDevices = useLive ? wsSnap.devices : (fleet?.devices ?? [])
+  const gridDevices = aiResult
+    ? aiResult.devices
+    : useLive
+      ? wsSnap.devices.slice(0, PAGE)
+      : effectiveDevices
+  const matched = useLive ? (wsSnap.summary?.total ?? wsSnap.devices.length) : (fleet?.total ?? 0)
   const counts = {
-    all: summary?.total ?? 0,
-    ok: summary?.ok ?? 0,
-    warning: summary?.warning ?? 0,
-    critical: summary?.critical ?? 0,
+    all: liveSummary?.total ?? 0,
+    ok: liveSummary?.ok ?? 0,
+    warning: liveSummary?.warning ?? 0,
+    critical: liveSummary?.critical ?? 0,
   }
 
-  const lastUpdated = devices.length
+  const lastUpdated = effectiveDevices.length
     ? new Date(
-        devices.reduce((m, d) => (d.ts > m ? d.ts : m), devices[0].ts),
+        effectiveDevices.reduce((m, d) => (d.ts > m ? d.ts : m), effectiveDevices[0].ts),
       ).toLocaleTimeString()
     : null
 
@@ -140,10 +157,12 @@ function Dashboard({ user, onLogout }) {
           </div>
         </div>
         <div className="topbar-status">
-          {error ? (
+          {wsConnected ? (
+            <span className="conn conn-live">⚡ Realtime</span>
+          ) : error ? (
             <span className="conn conn-bad">● disconnected</span>
           ) : (
-            <span className="conn conn-ok">● live</span>
+            <span className="conn conn-ok">● polling</span>
           )}
           {lastUpdated && <span className="updated">updated {lastUpdated}</span>}
           <div className="user-chip">
@@ -228,7 +247,7 @@ function Dashboard({ user, onLogout }) {
       </div>
 
       <main className="content">
-        {loading && !aiResult && !devices.length ? (
+        {loading && !aiResult && !useLive && !gridDevices.length ? (
           <div className="empty">Loading fleet…</div>
         ) : gridDevices.length ? (
           <FleetGrid devices={gridDevices} onSelect={setSelected} />

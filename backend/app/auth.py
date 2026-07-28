@@ -78,6 +78,17 @@ def require_user(cred: HTTPAuthorizationCredentials | None = Depends(_bearer)) -
     return user
 
 
+def user_from_token(token: str) -> dict | None:
+    """Validate a raw JWT (used for WebSocket auth, where headers are awkward)."""
+    if not token:
+        return None
+    try:
+        payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGO])
+    except jwt.PyJWTError:
+        return None
+    return query_one("SELECT id, email, role FROM users WHERE email = %s", (payload.get("sub"),))
+
+
 def require_role(*allowed: str):
     """Dependency factory for role-gated endpoints (scaffolded for later use)."""
     def _dep(user: dict = Depends(require_user)) -> dict:
