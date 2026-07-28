@@ -17,6 +17,9 @@ frontend/.vite/
 *.log
 npm-debug.log*
 
+# Generated deliverables (regenerated from docs/*.md)
+deliverables/
+
 # OS / editor
 .DS_Store
 Thumbs.db

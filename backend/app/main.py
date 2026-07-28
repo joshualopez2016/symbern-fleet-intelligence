@@ -15,6 +15,9 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
+import subprocess
+import sys as _sys
 from contextlib import asynccontextmanager
 from datetime import date, datetime
 from typing import Optional
@@ -30,6 +33,7 @@ from .db import pool, ro_pool, query, query_one
 
 import sys
 from pathlib import Path
+ROOT_REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from config.thresholds import THRESHOLDS  # noqa: E402
 
@@ -41,12 +45,25 @@ VALID_STATUS = {"ok", "warning", "critical"}
 VALID_SEVERITY = {"info", "warning", "critical"}
 
 
+_sim_proc = None
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     pool.open()
     ro_pool.open()
     broadcaster = asyncio.create_task(_broadcaster())
+    # Single-service deploy: run the telemetry simulator inside this process.
+    global _sim_proc
+    if os.environ.get("RUN_SIMULATOR") == "1":
+        _sim_proc = subprocess.Popen([
+            _sys.executable, str(ROOT_REPO / "simulator" / "simulator.py"),
+            "--fleet-size", os.environ.get("SIM_FLEET", "30"),
+            "--interval", os.environ.get("SIM_INTERVAL", "2"),
+        ])
     yield
+    if _sim_proc is not None:
+        _sim_proc.terminate()
     broadcaster.cancel()
     pool.close()
     ro_pool.close()
@@ -1013,3 +1030,13 @@ def export_production(
         tuple(params),
     )
     return _export_response(fmt, PRODUCTION_COLS, rows, "test_records")
+
+
+# ---- Serve the built frontend (single-service production deploy) ------------
+# Mounted LAST so every /api route and the WebSocket take precedence. In local
+# dev the frontend runs on Vite (:5173) and this dir doesn't exist, so it's a
+# no-op; in production the Docker build drops the built app at frontend/dist.
+_STATIC_DIR = os.environ.get("STATIC_DIR") or str(ROOT_REPO / "frontend" / "dist")
+if os.path.isdir(_STATIC_DIR):
+    from fastapi.staticfiles import StaticFiles
+    app.mount("/", StaticFiles(directory=_STATIC_DIR, html=True), name="static")

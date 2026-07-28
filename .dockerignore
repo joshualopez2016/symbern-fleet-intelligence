@@ -1,0 +1,14 @@
+**/node_modules
+frontend/dist
+frontend/.vite
+**/__pycache__
+**/*.pyc
+.git
+.venv
+venv
+.env
+.env.*
+tests
+deliverables
+docs
+*.md

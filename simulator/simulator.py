@@ -27,11 +27,12 @@ from __future__ import annotations
 import argparse
 import os
 import signal
+import ssl
 import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from urllib.parse import unquote, urlparse
+from urllib.parse import parse_qs, unquote, urlparse
 
 import pg8000.dbapi
 from dotenv import load_dotenv
@@ -68,13 +69,17 @@ _rng = random.Random()
 
 def connect():
     u = urlparse(DATABASE_URL)
-    return pg8000.dbapi.connect(
+    kwargs = dict(
         user=unquote(u.username or ""),
         password=unquote(u.password or ""),
         host=u.hostname or "127.0.0.1",
         port=u.port or 5432,
         database=(u.path or "/").lstrip("/") or "postgres",
     )
+    sslmode = (parse_qs(u.query).get("sslmode", [""])[0]).lower()
+    if sslmode in ("require", "verify-ca", "verify-full") or os.environ.get("DB_SSL") == "1":
+        kwargs["ssl_context"] = ssl.create_default_context()
+    return pg8000.dbapi.connect(**kwargs)
 
 
 def _insert_many(cur, prefix: str, template: str, rows: list, suffix: str = "") -> None:

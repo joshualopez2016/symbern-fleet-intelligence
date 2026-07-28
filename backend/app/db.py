@@ -9,11 +9,12 @@ from __future__ import annotations
 
 import os
 import queue
+import ssl
 import threading
 from contextlib import contextmanager
 from decimal import Decimal
 from pathlib import Path
-from urllib.parse import unquote, urlparse
+from urllib.parse import parse_qs, unquote, urlparse
 
 import pg8000.dbapi
 from dotenv import load_dotenv
@@ -28,13 +29,19 @@ if not DATABASE_URL:
 
 def _conn_params(url: str) -> dict:
     u = urlparse(url)
-    return {
+    params = {
         "user": unquote(u.username or ""),
         "password": unquote(u.password or ""),
         "host": u.hostname or "127.0.0.1",
         "port": u.port or 5432,
         "database": (u.path or "/").lstrip("/") or "postgres",
     }
+    # Managed Postgres (Neon/Supabase/etc.) requires TLS. Enable it when the URL
+    # says so (?sslmode=require) or DB_SSL=1.
+    sslmode = (parse_qs(u.query).get("sslmode", [""])[0]).lower()
+    if sslmode in ("require", "verify-ca", "verify-full") or os.environ.get("DB_SSL") == "1":
+        params["ssl_context"] = ssl.create_default_context()
+    return params
 
 
 _PARAMS = _conn_params(DATABASE_URL)
