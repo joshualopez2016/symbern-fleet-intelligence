@@ -1,19 +1,63 @@
 import { useEffect, useState } from 'react'
-import { fetchFleet, fetchFleetSummary } from './api'
+import { fetchFleet, fetchFleetSummary, fetchMe, logout, getAuthToken, aiStatus, exportFleet } from './api'
 import { usePolling } from './usePolling'
 import FleetGrid from './components/FleetGrid'
 import DeviceDetail from './components/DeviceDetail'
 import AlertsPanel from './components/AlertsPanel'
+import AiPanel from './components/AiPanel'
+import DailyReport from './components/DailyReport'
+import Login from './components/Login'
 
 const POLL_MS = 3000
 const PAGE = 200 // bounded worst-first page — response size stays flat as the fleet grows
 
 export default function App() {
+  const [user, setUser] = useState(null)
+  const [checking, setChecking] = useState(true)
+
+  useEffect(() => {
+    let cancelled = false
+    const onUnauth = () => setUser(null)
+    window.addEventListener('bms-unauthorized', onUnauth)
+    if (getAuthToken()) {
+      fetchMe()
+        .then((u) => !cancelled && setUser(u))
+        .catch(() => !cancelled && setUser(null))
+        .finally(() => !cancelled && setChecking(false))
+    } else {
+      setChecking(false)
+    }
+    return () => {
+      cancelled = true
+      window.removeEventListener('bms-unauthorized', onUnauth)
+    }
+  }, [])
+
+  async function handleLogout() {
+    await logout()
+    setUser(null)
+  }
+
+  if (checking) {
+    return (
+      <div className="app">
+        <div className="empty">Loading…</div>
+      </div>
+    )
+  }
+  if (!user) return <Login onLogin={setUser} />
+  return <Dashboard user={user} onLogout={handleLogout} />
+}
+
+function Dashboard({ user, onLogout }) {
   const [statusFilter, setStatusFilter] = useState('all')
   const [search, setSearch] = useState('')
   const [debouncedSearch, setDebouncedSearch] = useState('')
   const [offset, setOffset] = useState(0)
   const [selected, setSelected] = useState(null)
+  const [aiResult, setAiResult] = useState(null)
+  const [aiConfigured, setAiConfigured] = useState(false)
+  const [showReport, setShowReport] = useState(false)
 
   // debounce the search box so typing doesn't fire a request per keystroke
   useEffect(() => {
@@ -21,10 +65,15 @@ export default function App() {
     return () => clearTimeout(t)
   }, [search])
 
-  // reset paging when the filter or search changes
+  // reset paging + clear any AI search when the normal filter/search changes
   useEffect(() => {
     setOffset(0)
+    setAiResult(null)
   }, [statusFilter, debouncedSearch])
+
+  useEffect(() => {
+    aiStatus().then((s) => setAiConfigured(s.configured)).catch(() => {})
+  }, [])
 
   // Whole-fleet tallies — one cheap aggregate, independent of paging.
   const { data: summary } = usePolling(fetchFleetSummary, POLL_MS, [])
@@ -44,6 +93,7 @@ export default function App() {
   )
 
   const devices = fleet?.devices ?? []
+  const gridDevices = aiResult ? aiResult.devices : devices
   const matched = fleet?.total ?? 0
   const counts = {
     all: summary?.total ?? 0,
@@ -78,6 +128,11 @@ export default function App() {
             <span className="conn conn-ok">● live</span>
           )}
           {lastUpdated && <span className="updated">updated {lastUpdated}</span>}
+          <div className="user-chip">
+            <span className="user-email">{user.email}</span>
+            <span className={`user-role role-${user.role}`}>{user.role}</span>
+            <button className="logout-btn" onClick={onLogout}>Log out</button>
+          </div>
         </div>
       </header>
 
@@ -108,10 +163,22 @@ export default function App() {
         </div>
       </section>
 
+      <AiPanel
+        configured={aiConfigured}
+        active={!!aiResult}
+        onResult={setAiResult}
+        onClear={() => setAiResult(null)}
+      />
+
       <AlertsPanel onSelect={setSelected} />
 
       <div className="fleet-meta">
-        {matched > 0 ? (
+        {aiResult ? (
+          <span className="ai-result-meta">
+            ✨ {aiResult.explanation || 'AI search'} · <strong>{aiResult.count}</strong>{' '}
+            match{aiResult.count === 1 ? '' : 'es'}
+          </span>
+        ) : matched > 0 ? (
           <span>
             Showing <strong>{pageStart}–{pageEnd}</strong> of <strong>{matched}</strong>
             {statusFilter !== 'all' ? ` ${statusFilter}` : ''} device
@@ -120,31 +187,35 @@ export default function App() {
         ) : (
           <span />
         )}
-        {matched > PAGE && (
-          <div className="pager">
-            <button disabled={offset === 0} onClick={() => setOffset((o) => Math.max(0, o - PAGE))}>
-              ‹ Prev
-            </button>
-            <button disabled={pageEnd >= matched} onClick={() => setOffset((o) => o + PAGE)}>
-              Next ›
-            </button>
-          </div>
-        )}
+        <div className="fleet-actions">
+          <button className="pager-btn" onClick={() => exportFleet('csv', { status: statusFilter, q: debouncedSearch })}>⬇ CSV</button>
+          <button className="pager-btn" onClick={() => exportFleet('xlsx', { status: statusFilter, q: debouncedSearch })}>⬇ Excel</button>
+          <button className="pager-btn" onClick={() => setShowReport(true)}>📄 Daily Report</button>
+          {!aiResult && matched > PAGE && (
+            <>
+              <button className="pager-btn" disabled={offset === 0} onClick={() => setOffset((o) => Math.max(0, o - PAGE))}>‹ Prev</button>
+              <button className="pager-btn" disabled={pageEnd >= matched} onClick={() => setOffset((o) => o + PAGE)}>Next ›</button>
+            </>
+          )}
+        </div>
       </div>
 
       <main className="content">
-        {loading && !devices.length ? (
+        {loading && !aiResult && !devices.length ? (
           <div className="empty">Loading fleet…</div>
-        ) : devices.length ? (
-          <FleetGrid devices={devices} onSelect={setSelected} />
+        ) : gridDevices.length ? (
+          <FleetGrid devices={gridDevices} onSelect={setSelected} />
         ) : (
-          <div className="empty">No devices match this filter.</div>
+          <div className="empty">
+            {aiResult ? 'No devices match your AI search.' : 'No devices match this filter.'}
+          </div>
         )}
       </main>
 
       {selected && (
         <DeviceDetail deviceId={selected} onClose={() => setSelected(null)} />
       )}
+      {showReport && <DailyReport onClose={() => setShowReport(false)} />}
     </div>
   )
 }

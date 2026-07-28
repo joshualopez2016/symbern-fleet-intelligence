@@ -21,6 +21,8 @@ CREATE TABLE devices (
     label            TEXT        NOT NULL,
     model            TEXT        NOT NULL,
     site             TEXT        NOT NULL,              -- depot / location
+    company          TEXT        NOT NULL DEFAULT 'Unassigned',  -- operating company
+    equipment        TEXT        NOT NULL DEFAULT 'Unassigned',  -- equipment the pack powers
     cell_count       INTEGER     NOT NULL DEFAULT 16,   -- reserved for cell-level stretch
     nominal_voltage  NUMERIC(6,2) NOT NULL,             -- pack nominal, e.g. 51.20 V
     capacity_ah      NUMERIC(7,2) NOT NULL,             -- pack capacity, e.g. 100.00 Ah

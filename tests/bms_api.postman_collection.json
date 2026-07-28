@@ -1,0 +1,283 @@
+{
+  "info": {
+    "_postman_id": "bms-cloud-dashboard-0001-4a2b-9c3d-0001aa77bb88",
+    "name": "BMS Cloud Dashboard API",
+    "description": "Full API test collection for the BMS Cloud Dashboard. Import into Postman or Thunder Client and run in order (top to bottom) with the Collection Runner. The first request logs in and stores the JWT in the {{token}} collection variable; later requests reuse it. Covers auth, fleet, devices, readings, alarms, config, AI, and notes CRUD, plus error/edge cases (401 / 422 / 404). Set {{baseUrl}} to your API (default http://127.0.0.1:8000).",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "baseUrl", "value": "http://127.0.0.1:8000" },
+    { "key": "token", "value": "" },
+    { "key": "deviceId", "value": "" },
+    { "key": "noteId", "value": "" },
+    { "key": "adminEmail", "value": "admin@bms.local" },
+    { "key": "adminPassword", "value": "Admin#2026" }
+  ],
+  "auth": { "type": "bearer", "bearer": [ { "key": "token", "value": "{{token}}", "type": "string" } ] },
+  "item": [
+    {
+      "name": "Auth",
+      "item": [
+        {
+          "name": "Login (admin) — 200, stores token",
+          "event": [ { "listen": "test", "script": { "type": "text/javascript", "exec": [
+            "pm.test('status 200', () => pm.response.to.have.status(200));",
+            "const j = pm.response.json();",
+            "pm.test('returns a token', () => pm.expect(j.token).to.be.a('string').and.not.empty);",
+            "pm.test('returns user + role', () => { pm.expect(j.user.email).to.eql(pm.collectionVariables.get('adminEmail')); pm.expect(j.user.role).to.eql('administrator'); });",
+            "pm.collectionVariables.set('token', j.token);"
+          ] } } ],
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [ { "key": "Content-Type", "value": "application/json" } ],
+            "body": { "mode": "raw", "raw": "{\n  \"email\": \"{{adminEmail}}\",\n  \"password\": \"{{adminPassword}}\"\n}" },
+            "url": { "raw": "{{baseUrl}}/api/auth/login", "host": [ "{{baseUrl}}" ], "path": [ "api", "auth", "login" ] }
+          }
+        },
+        {
+          "name": "Login (bad password) — 401",
+          "event": [ { "listen": "test", "script": { "type": "text/javascript", "exec": [
+            "pm.test('rejected with 401', () => pm.response.to.have.status(401));"
+          ] } } ],
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [ { "key": "Content-Type", "value": "application/json" } ],
+            "body": { "mode": "raw", "raw": "{\n  \"email\": \"{{adminEmail}}\",\n  \"password\": \"wrong-password\"\n}" },
+            "url": { "raw": "{{baseUrl}}/api/auth/login", "host": [ "{{baseUrl}}" ], "path": [ "api", "auth", "login" ] }
+          }
+        },
+        {
+          "name": "Current user (me) — 200",
+          "event": [ { "listen": "test", "script": { "type": "text/javascript", "exec": [
+            "pm.test('status 200', () => pm.response.to.have.status(200));",
+            "pm.test('is the admin', () => pm.expect(pm.response.json().role).to.eql('administrator'));"
+          ] } } ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{baseUrl}}/api/auth/me", "host": [ "{{baseUrl}}" ], "path": [ "api", "auth", "me" ] }
+          }
+        },
+        {
+          "name": "Protected without token — 401",
+          "event": [ { "listen": "test", "script": { "type": "text/javascript", "exec": [
+            "pm.test('blocked with 401', () => pm.response.to.have.status(401));"
+          ] } } ],
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{baseUrl}}/api/fleet/summary", "host": [ "{{baseUrl}}" ], "path": [ "api", "fleet", "summary" ] }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Fleet",
+      "item": [
+        {
+          "name": "Fleet summary — 200",
+          "event": [ { "listen": "test", "script": { "type": "text/javascript", "exec": [
+            "pm.test('status 200', () => pm.response.to.have.status(200));",
+            "const j = pm.response.json();",
+            "pm.test('has tallies', () => ['total','ok','warning','critical','active_alarms'].forEach(k => pm.expect(j).to.have.property(k)));",
+            "pm.test('tallies sum to total', () => pm.expect(j.ok + j.warning + j.critical).to.eql(j.total));"
+          ] } } ],
+          "request": { "method": "GET", "header": [], "url": { "raw": "{{baseUrl}}/api/fleet/summary", "host": [ "{{baseUrl}}" ], "path": [ "api", "fleet", "summary" ] } }
+        },
+        {
+          "name": "Fleet list (worst-first) — 200, stores deviceId",
+          "event": [ { "listen": "test", "script": { "type": "text/javascript", "exec": [
+            "pm.test('status 200', () => pm.response.to.have.status(200));",
+            "const j = pm.response.json();",
+            "pm.test('returns devices', () => pm.expect(j.devices.length).to.be.above(0));",
+            "pm.collectionVariables.set('deviceId', j.devices[0].device_id);"
+          ] } } ],
+          "request": { "method": "GET", "header": [], "url": { "raw": "{{baseUrl}}/api/fleet?limit=5", "host": [ "{{baseUrl}}" ], "path": [ "api", "fleet" ], "query": [ { "key": "limit", "value": "5" } ] } }
+        },
+        {
+          "name": "Fleet filter (warning) — 200",
+          "event": [ { "listen": "test", "script": { "type": "text/javascript", "exec": [
+            "pm.test('status 200', () => pm.response.to.have.status(200));",
+            "pm.test('all returned are warning', () => pm.response.json().devices.forEach(d => pm.expect(d.status).to.eql('warning')));"
+          ] } } ],
+          "request": { "method": "GET", "header": [], "url": { "raw": "{{baseUrl}}/api/fleet?status=warning&limit=50", "host": [ "{{baseUrl}}" ], "path": [ "api", "fleet" ], "query": [ { "key": "status", "value": "warning" }, { "key": "limit", "value": "50" } ] } }
+        },
+        {
+          "name": "Fleet invalid status — 422",
+          "event": [ { "listen": "test", "script": { "type": "text/javascript", "exec": [
+            "pm.test('rejected with 422', () => pm.response.to.have.status(422));"
+          ] } } ],
+          "request": { "method": "GET", "header": [], "url": { "raw": "{{baseUrl}}/api/fleet?status=bogus", "host": [ "{{baseUrl}}" ], "path": [ "api", "fleet" ], "query": [ { "key": "status", "value": "bogus" } ] } }
+        }
+      ]
+    },
+    {
+      "name": "Devices & readings",
+      "item": [
+        {
+          "name": "Device detail — 200",
+          "event": [ { "listen": "test", "script": { "type": "text/javascript", "exec": [
+            "pm.test('status 200', () => pm.response.to.have.status(200));",
+            "pm.test('matches requested device', () => pm.expect(pm.response.json().device.device_id).to.eql(pm.collectionVariables.get('deviceId')));"
+          ] } } ],
+          "request": { "method": "GET", "header": [], "url": { "raw": "{{baseUrl}}/api/devices/{{deviceId}}", "host": [ "{{baseUrl}}" ], "path": [ "api", "devices", "{{deviceId}}" ] } }
+        },
+        {
+          "name": "Device unknown — 404",
+          "event": [ { "listen": "test", "script": { "type": "text/javascript", "exec": [
+            "pm.test('not found 404', () => pm.response.to.have.status(404));"
+          ] } } ],
+          "request": { "method": "GET", "header": [], "url": { "raw": "{{baseUrl}}/api/devices/NOPE-9999", "host": [ "{{baseUrl}}" ], "path": [ "api", "devices", "NOPE-9999" ] } }
+        },
+        {
+          "name": "Readings (latest N) — 200",
+          "event": [ { "listen": "test", "script": { "type": "text/javascript", "exec": [
+            "pm.test('status 200', () => pm.response.to.have.status(200));",
+            "pm.test('has readings array', () => pm.expect(pm.response.json().readings).to.be.an('array'));"
+          ] } } ],
+          "request": { "method": "GET", "header": [], "url": { "raw": "{{baseUrl}}/api/devices/{{deviceId}}/readings?limit=5", "host": [ "{{baseUrl}}" ], "path": [ "api", "devices", "{{deviceId}}", "readings" ], "query": [ { "key": "limit", "value": "5" } ] } }
+        }
+      ]
+    },
+    {
+      "name": "Alarms & config",
+      "item": [
+        {
+          "name": "Active alarms — 200",
+          "event": [ { "listen": "test", "script": { "type": "text/javascript", "exec": [
+            "pm.test('status 200', () => pm.response.to.have.status(200));",
+            "pm.test('all active', () => pm.response.json().alarms.forEach(a => pm.expect(a.active).to.be.true));"
+          ] } } ],
+          "request": { "method": "GET", "header": [], "url": { "raw": "{{baseUrl}}/api/alarms?active=true&limit=50", "host": [ "{{baseUrl}}" ], "path": [ "api", "alarms" ], "query": [ { "key": "active", "value": "true" }, { "key": "limit", "value": "50" } ] } }
+        },
+        {
+          "name": "Thresholds — 200",
+          "event": [ { "listen": "test", "script": { "type": "text/javascript", "exec": [
+            "pm.test('status 200', () => pm.response.to.have.status(200));",
+            "pm.test('has soc + voltage + temp limits', () => { const j = pm.response.json(); ['soc','pack_voltage_frac','temperature_c'].forEach(k => pm.expect(j).to.have.property(k)); });"
+          ] } } ],
+          "request": { "method": "GET", "header": [], "url": { "raw": "{{baseUrl}}/api/config/thresholds", "host": [ "{{baseUrl}}" ], "path": [ "api", "config", "thresholds" ] } }
+        }
+      ]
+    },
+    {
+      "name": "AI",
+      "item": [
+        {
+          "name": "AI status — 200",
+          "event": [ { "listen": "test", "script": { "type": "text/javascript", "exec": [
+            "pm.test('status 200', () => pm.response.to.have.status(200));",
+            "pm.test('reports configured flag', () => pm.expect(pm.response.json().configured).to.be.a('boolean'));"
+          ] } } ],
+          "request": { "method": "GET", "header": [], "url": { "raw": "{{baseUrl}}/api/ai/status", "host": [ "{{baseUrl}}" ], "path": [ "api", "ai", "status" ] } }
+        },
+        {
+          "name": "AI search requires auth — 401",
+          "event": [ { "listen": "test", "script": { "type": "text/javascript", "exec": [
+            "pm.test('blocked with 401', () => pm.response.to.have.status(401));"
+          ] } } ],
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [ { "key": "Content-Type", "value": "application/json" } ],
+            "body": { "mode": "raw", "raw": "{ \"query\": \"critical packs\" }" },
+            "url": { "raw": "{{baseUrl}}/api/ai/search", "host": [ "{{baseUrl}}" ], "path": [ "api", "ai", "search" ] }
+          }
+        },
+        {
+          "name": "AI search (NL -> filters) — 200 [spends LLM budget]",
+          "event": [ { "listen": "test", "script": { "type": "text/javascript", "exec": [
+            "// Requires TRUSSED_API_KEY set on the server; skips gracefully if AI is off.",
+            "if (pm.response.code === 503) { pm.test.skip('AI not configured (no TRUSSED_API_KEY)'); }",
+            "else { pm.test('status 200', () => pm.response.to.have.status(200));",
+            "  const j = pm.response.json();",
+            "  pm.test('has explanation + devices', () => { pm.expect(j).to.have.property('explanation'); pm.expect(j.devices).to.be.an('array'); }); }"
+          ] } } ],
+          "request": {
+            "method": "POST",
+            "header": [ { "key": "Content-Type", "value": "application/json" } ],
+            "body": { "mode": "raw", "raw": "{ \"query\": \"warning packs below 25 percent state of charge\" }" },
+            "url": { "raw": "{{baseUrl}}/api/ai/search", "host": [ "{{baseUrl}}" ], "path": [ "api", "ai", "search" ] }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Notes (CRUD)",
+      "item": [
+        {
+          "name": "Create note — 200, stores noteId",
+          "event": [ { "listen": "test", "script": { "type": "text/javascript", "exec": [
+            "pm.test('status 200', () => pm.response.to.have.status(200));",
+            "const j = pm.response.json();",
+            "pm.test('echoes body', () => pm.expect(j.body).to.include('Postman test note'));",
+            "pm.collectionVariables.set('noteId', j.id);"
+          ] } } ],
+          "request": {
+            "method": "POST",
+            "header": [ { "key": "Content-Type", "value": "application/json" } ],
+            "body": { "mode": "raw", "raw": "{ \"body\": \"Postman test note — inspect terminals.\" }" },
+            "url": { "raw": "{{baseUrl}}/api/devices/{{deviceId}}/notes", "host": [ "{{baseUrl}}" ], "path": [ "api", "devices", "{{deviceId}}", "notes" ] }
+          }
+        },
+        {
+          "name": "List notes — 200, contains created",
+          "event": [ { "listen": "test", "script": { "type": "text/javascript", "exec": [
+            "pm.test('status 200', () => pm.response.to.have.status(200));",
+            "const id = Number(pm.collectionVariables.get('noteId'));",
+            "pm.test('list contains the new note', () => pm.expect(pm.response.json().notes.some(n => n.id === id)).to.be.true);"
+          ] } } ],
+          "request": { "method": "GET", "header": [], "url": { "raw": "{{baseUrl}}/api/devices/{{deviceId}}/notes", "host": [ "{{baseUrl}}" ], "path": [ "api", "devices", "{{deviceId}}", "notes" ] } }
+        },
+        {
+          "name": "Update note — 200",
+          "event": [ { "listen": "test", "script": { "type": "text/javascript", "exec": [
+            "pm.test('status 200', () => pm.response.to.have.status(200));",
+            "pm.test('body updated', () => pm.expect(pm.response.json().body).to.include('edited'));"
+          ] } } ],
+          "request": {
+            "method": "PUT",
+            "header": [ { "key": "Content-Type", "value": "application/json" } ],
+            "body": { "mode": "raw", "raw": "{ \"body\": \"Postman test note — edited.\" }" },
+            "url": { "raw": "{{baseUrl}}/api/notes/{{noteId}}", "host": [ "{{baseUrl}}" ], "path": [ "api", "notes", "{{noteId}}" ] }
+          }
+        },
+        {
+          "name": "Create empty note — 422",
+          "event": [ { "listen": "test", "script": { "type": "text/javascript", "exec": [
+            "pm.test('rejected with 422', () => pm.response.to.have.status(422));"
+          ] } } ],
+          "request": {
+            "method": "POST",
+            "header": [ { "key": "Content-Type", "value": "application/json" } ],
+            "body": { "mode": "raw", "raw": "{ \"body\": \"   \" }" },
+            "url": { "raw": "{{baseUrl}}/api/devices/{{deviceId}}/notes", "host": [ "{{baseUrl}}" ], "path": [ "api", "devices", "{{deviceId}}", "notes" ] }
+          }
+        },
+        {
+          "name": "Delete note — 200",
+          "event": [ { "listen": "test", "script": { "type": "text/javascript", "exec": [
+            "pm.test('status 200', () => pm.response.to.have.status(200));",
+            "pm.test('reports deleted id', () => pm.expect(Number(pm.response.json().deleted)).to.eql(Number(pm.collectionVariables.get('noteId'))));"
+          ] } } ],
+          "request": { "method": "DELETE", "header": [], "url": { "raw": "{{baseUrl}}/api/notes/{{noteId}}", "host": [ "{{baseUrl}}" ], "path": [ "api", "notes", "{{noteId}}" ] } }
+        },
+        {
+          "name": "Update deleted note — 404",
+          "event": [ { "listen": "test", "script": { "type": "text/javascript", "exec": [
+            "pm.test('gone -> 404', () => pm.response.to.have.status(404));"
+          ] } } ],
+          "request": {
+            "method": "PUT",
+            "header": [ { "key": "Content-Type", "value": "application/json" } ],
+            "body": { "mode": "raw", "raw": "{ \"body\": \"should not exist\" }" },
+            "url": { "raw": "{{baseUrl}}/api/notes/{{noteId}}", "host": [ "{{baseUrl}}" ], "path": [ "api", "notes", "{{noteId}}" ] }
+          }
+        }
+      ]
+    }
+  ]
+}

@@ -114,6 +114,16 @@ Everything lives inside this one folder. To relocate:
 Nothing outside this folder is required except the locally-installed Postgres
 service (recreated via the DB setup step) and the Python/Node runtimes.
 
+## Testing
+The API is covered by a **Postman/Thunder Client collection** (22 requests, 39
+assertions) and a **pytest suite** (19 tests) — both green against a live server,
+covering auth, CRUD (notes), AI, and error/edge cases (401/422/404). See
+[docs/TESTING.md](docs/TESTING.md).
+```bash
+py -m pip install -r tests/requirements.txt && py -m pytest tests/ -v
+# or:  newman run tests/bms_api.postman_collection.json
+```
+
 ## Security self-certification
 All four checklist items pass — full evidence in [docs/SECURITY.md](docs/SECURITY.md):
 - ✅ No secrets / connection strings in the repo (`.env` git-ignored; runtime reads from env)

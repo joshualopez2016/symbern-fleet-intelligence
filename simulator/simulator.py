@@ -58,6 +58,10 @@ INSERT_CHUNK = 1000
 
 SITES = ["Depot-North", "Depot-South", "Yard-A", "Yard-B", "Substation-3"]
 MODELS = ["PowerCell-48", "PowerCell-51", "Industns-100"]
+COMPANIES = ["Northwind Energy", "Cascade Logistics", "Harbor Marine",
+             "Summit Materials", "Delta Freight"]
+EQUIPMENT = ["Forklift", "AGV", "Yard Tractor", "Backup UPS",
+             "Ground Power Unit", "Reach Stacker"]
 
 _rng = random.Random()
 
@@ -107,6 +111,8 @@ class Battery:
         self.label = f"Pack {idx:04d}"
         self.model = rng.choice(MODELS)
         self.site = rng.choice(SITES)
+        self.company = rng.choice(COMPANIES)
+        self.equipment = rng.choice(EQUIPMENT)
         self.cell_count = rng.choice([15, 16])
         self.nominal_voltage = round(self.cell_count * 3.2, 2)      # LiFePO4 ~3.2 V/cell
         self.capacity_ah = float(rng.choice([100, 150, 200, 280]))
@@ -170,13 +176,13 @@ class Battery:
 def seed_devices(conn, fleet: list[Battery]) -> None:
     cur = conn.cursor()
     try:
-        rows = [(b.device_id, b.label, b.model, b.site, b.cell_count,
-                 b.nominal_voltage, b.capacity_ah) for b in fleet]
+        rows = [(b.device_id, b.label, b.model, b.site, b.company, b.equipment,
+                 b.cell_count, b.nominal_voltage, b.capacity_ah) for b in fleet]
         _insert_many(
             cur,
-            "INSERT INTO devices (device_id, label, model, site, cell_count, "
-            "nominal_voltage, capacity_ah) VALUES ",
-            "(%s, %s, %s, %s, %s, %s, %s)",
+            "INSERT INTO devices (device_id, label, model, site, company, equipment, "
+            "cell_count, nominal_voltage, capacity_ah) VALUES ",
+            "(%s, %s, %s, %s, %s, %s, %s, %s, %s)",
             rows,
             " ON CONFLICT (device_id) DO NOTHING",
         )

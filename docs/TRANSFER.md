@@ -29,8 +29,28 @@ Captured in `backend/requirements.txt` and `simulator/requirements.txt`:
 - `fastapi` 0.140.0
 - `uvicorn[standard]`
 - `python-dotenv`
+- `PyJWT` ≥ 2.8 (MIT) — auth session tokens
+- `bcrypt` ≥ 4.1 (Apache-2.0) — password hashing
+- `requests` ≥ 2.31 (Apache-2.0) — HTTP client for the AI (Trussed.ai) calls
+- `openpyxl` ≥ 3.1 (MIT) — Excel (.xlsx) export
 
-Dev-only tool (NOT a project dependency, not in requirements): `pip-audit`.
+New backend file: `app/exports.py`. New frontend file: `components/DailyReport.jsx`.
+
+New env vars (in `.env`): `TRUSSED_API_KEY` (required for AI features; server-side
+only), optional `TRUSSED_MODEL` (default gpt-5.4) / `TRUSSED_BASE_URL`.
+DB objects added: `notes` table (`sql/notes.sql`).
+New backend files: `app/ai.py`. New frontend files: `components/Notes.jsx`,
+`components/AiPanel.jsx`.
+
+New env var (in `.env`, git-ignored): `JWT_SECRET` (see `.env.example`).
+DB objects added: `users` table (`sql/auth.sql`), `daily_pack_report` view +
+`daily_pack_report_archive` (`sql/daily_report.sql`), and `company`/`equipment`
+columns on `devices`. Seed users with `py backend/create_user.py <email> <pw> [role]`.
+
+Test deps (in `tests/requirements.txt`): `pytest`, `requests`.
+Dev-only tools (NOT project deps): `pip-audit`; `newman` (npm global, for running
+the Postman collection headless — optional).
+New test files: `tests/test_api.py`, `tests/bms_api.postman_collection.json`.
 The earlier `psycopg`/`psycopg_pool` packages are no longer used and can be
 ignored (LGPL — replaced by pg8000).
 

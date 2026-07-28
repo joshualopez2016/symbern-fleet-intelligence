@@ -10,7 +10,20 @@ ISO-8601 with timezone.
 ---
 
 ## GET /api/health
-Liveness + DB reachability. → `{ "status": "ok" }`
+Liveness + DB reachability. → `{ "status": "ok" }` (open, no auth)
+
+## Authentication
+All `/api/*` data endpoints below require a **Bearer JWT** (`Authorization:
+Bearer <token>`); without it they return `401`. `/api/health` and
+`/api/auth/login` are open.
+
+- **POST /api/auth/login** — body `{ "email", "password" }` →
+  `{ "token": "<jwt>", "user": { "email", "role" } }`. `401` on bad credentials.
+- **GET /api/auth/me** — current user `{ "email", "role" }` (requires token).
+- **POST /api/auth/logout** — `{ "ok": true }` (stateless JWT; client discards token).
+
+Roles: `viewer | engineer | supervisor | administrator` (role-based gating is
+scaffolded via `require_role(...)` for future per-role restrictions).
 
 ## GET /api/config/thresholds
 The single source of truth for alert limits (same values the simulator alarms
@@ -100,6 +113,38 @@ Alarm feed, newest first.
 ```
 
 ---
+
+## AI features (FAU Trussed.ai, model gpt-5.4)
+Require auth. Rate-limited per user (15/min → `429`). The API key is server-side
+only (`TRUSSED_API_KEY`); if unset, these return `503` with a friendly message.
+
+- **GET /api/ai/status** → `{ "configured": bool, "model": "gpt-5.4" }`
+- **POST /api/ai/search** — body `{ "query": "critical packs at Harbor Marine below 20%" }`.
+  LLM turns English into structured filters, which are applied (parameterized) to
+  the fleet. → `{ "explanation", "filters", "count", "devices": [...] }`
+- **POST /api/ai/briefing** — no body. Gathers live fleet stats and returns an
+  LLM-written health summary → `{ "briefing": "…", "stats": {…} }`
+
+## Notes — per-user CRUD on a pack
+All require auth; every note is scoped to the authenticated user.
+
+- **GET /api/devices/{id}/notes** → `{ "count", "notes": [{id, device_id, body, created_at, updated_at}] }`
+- **POST /api/devices/{id}/notes** — body `{ "body": "…" }` → the created note. `422` if empty/too long, `404` unknown device.
+- **PUT /api/notes/{note_id}** — body `{ "body": "…" }` → updated note. `404` if not the user's note.
+- **DELETE /api/notes/{note_id}** → `{ "deleted": <id> }`. `404` if not the user's note.
+
+## Reporting & export
+Require auth.
+
+- **GET /api/daily-report?date=YYYY-MM-DD** → `{ "date", "count", "rows": [...] }`
+  (defaults to today). Each row is the wide `daily_pack_report` (30 columns).
+- **GET /api/export/fleet.{csv|xlsx}** ?status=&site=&q= → downloads the current
+  fleet status (all matching rows) as CSV or Excel. `404` on other formats.
+- **GET /api/export/daily-report.{csv|xlsx}** ?date= → downloads the daily report.
+
+Downloads carry `Content-Disposition: attachment`. The frontend fetches them with
+the Bearer token and saves the returned blob. (PDF is handled client-side via
+browser Print / Save-as-PDF of the report view.)
 
 ## Error shape
 FastAPI default: `{ "detail": "<message>" }` with `404` (unknown device) or `422`

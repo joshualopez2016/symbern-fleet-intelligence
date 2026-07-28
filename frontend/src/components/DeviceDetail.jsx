@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { fetchDevice, fetchReadings, fetchThresholds } from '../api'
 import { usePolling } from '../usePolling'
 import TrendChart from './TrendChart'
+import Notes from './Notes'
 
 const MAX_POINTS = 240 // rolling window kept in the charts
 const POLL_MS = 3000
@@ -144,6 +145,8 @@ export default function DeviceDetail({ deviceId, onClose }) {
           />
         </div>
         {points.length === 0 && <div className="drawer-placeholder">Loading history…</div>}
+
+        <Notes deviceId={deviceId} />
       </aside>
     </div>
   )

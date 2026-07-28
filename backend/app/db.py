@@ -118,3 +118,13 @@ def query_one(sql: str, params: tuple = ()) -> dict | None:
             return _floatify(dict(zip(cols, row))) if row else None
         finally:
             cur.close()
+
+
+def execute(sql: str, params: tuple = ()) -> None:
+    """Run a statement that returns no rows (UPDATE/INSERT without RETURNING)."""
+    with pool.connection() as conn:
+        cur = conn.cursor()
+        try:
+            cur.execute(sql, params)
+        finally:
+            cur.close()

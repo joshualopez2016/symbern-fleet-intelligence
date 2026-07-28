@@ -17,9 +17,11 @@ from contextlib import asynccontextmanager
 from datetime import datetime
 from typing import Optional
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import Depends, FastAPI, HTTPException, Query, Response
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
 
+from . import ai, auth, exports
 from .db import pool, query, query_one
 
 import sys
@@ -59,14 +61,41 @@ def health() -> dict:
     return {"status": "ok" if row and row["ok"] == 1 else "degraded"}
 
 
+# ---- Authentication --------------------------------------------------------
+
+class LoginBody(BaseModel):
+    email: str
+    password: str
+
+
+@app.post("/api/auth/login")
+def login(body: LoginBody) -> dict:
+    user = auth.authenticate(body.email, body.password)
+    if not user:
+        raise HTTPException(401, "Invalid email or password")
+    token = auth.create_token(user["email"], user["role"])
+    return {"token": token, "user": {"email": user["email"], "role": user["role"]}}
+
+
+@app.get("/api/auth/me")
+def me(user: dict = Depends(auth.require_user)) -> dict:
+    return {"email": user["email"], "role": user["role"]}
+
+
+@app.post("/api/auth/logout")
+def logout(user: dict = Depends(auth.require_user)) -> dict:
+    # Stateless JWT: the client discards its token. Endpoint exists for symmetry.
+    return {"ok": True}
+
+
 @app.get("/api/config/thresholds")
-def get_thresholds() -> dict:
+def get_thresholds(_user: dict = Depends(auth.require_user)) -> dict:
     """Serve the SAME limits the simulator alarms on, so the UI colors match."""
     return THRESHOLDS
 
 
 @app.get("/api/fleet/summary")
-def get_fleet_summary() -> dict:
+def get_fleet_summary(_user: dict = Depends(auth.require_user)) -> dict:
     """Whole-fleet status tallies from a single aggregate over device_status.
     Cost is independent of how the grid is paginated, so the UI can show true
     counts for thousands of devices without shipping every row."""
@@ -91,6 +120,7 @@ def get_fleet(
     since: Optional[datetime] = Query(None, description="only devices updated after this ts (delta poll)"),
     limit: int = Query(500, ge=1, le=MAX_FLEET),
     offset: int = Query(0, ge=0),
+    _user: dict = Depends(auth.require_user),
 ) -> dict:
     """Fleet grid — reads ONLY device_status (one row/device), joined to devices
     for label/site/model. Never scans the readings time-series."""
@@ -136,7 +166,7 @@ def get_fleet(
 
 
 @app.get("/api/devices/{device_id}")
-def get_device(device_id: str) -> dict:
+def get_device(device_id: str, _user: dict = Depends(auth.require_user)) -> dict:
     """Device detail: static metadata + its latest status snapshot."""
     device = query_one(
         "SELECT device_id, label, model, site, cell_count, nominal_voltage, "
@@ -158,6 +188,7 @@ def get_readings(
     device_id: str,
     since: Optional[datetime] = Query(None, description="return readings AFTER this ts (delta fetch)"),
     limit: int = Query(500, ge=1, le=MAX_READINGS),
+    _user: dict = Depends(auth.require_user),
 ) -> dict:
     """Time-series for the drill-down charts.
 
@@ -204,6 +235,7 @@ def get_alarms(
     severity: Optional[str] = Query(None, description="info | warning | critical"),
     device_id: Optional[str] = None,
     limit: int = Query(100, ge=1, le=MAX_ALARMS),
+    _user: dict = Depends(auth.require_user),
 ) -> dict:
     if severity is not None and severity not in VALID_SEVERITY:
         raise HTTPException(422, f"invalid severity; expected one of {sorted(VALID_SEVERITY)}")
@@ -234,3 +266,261 @@ def get_alarms(
         tuple(params) + (limit,),
     )
     return {"count": len(rows), "alarms": rows}
+
+
+# ---- AI features (FAU Trussed.ai) ------------------------------------------
+
+class AiSearchBody(BaseModel):
+    query: str
+
+
+@app.get("/api/ai/status")
+def ai_status(_user: dict = Depends(auth.require_user)) -> dict:
+    return {"configured": ai.is_configured(), "model": ai.MODEL}
+
+
+@app.post("/api/ai/search")
+def ai_search(body: AiSearchBody, user: dict = Depends(auth.require_user)) -> dict:
+    """Natural-language fleet search: English -> structured filters -> matching devices."""
+    q = (body.query or "").strip()
+    if not q:
+        raise HTTPException(400, "Please type a question first.")
+    if not ai.check_rate_limit(user["email"]):
+        raise HTTPException(429, "Too many AI requests — please wait a minute.")
+    try:
+        filters = ai.nl_to_filters(q)
+    except ai.AIError as e:
+        raise HTTPException(e.status, e.message)
+
+    where, params = [], []
+    status = str(filters.get("status") or "").strip()
+    if status in VALID_STATUS:
+        where.append("s.status = %s")
+        params.append(status)
+    for col, key in (("d.site", "site"), ("d.company", "company"), ("d.equipment", "equipment")):
+        val = str(filters.get(key) or "").strip()
+        if val:
+            where.append(f"{col} = %s")
+            params.append(val)
+    if isinstance(filters.get("soc_max"), (int, float)):
+        where.append("s.soc <= %s")
+        params.append(filters["soc_max"])
+    if isinstance(filters.get("soc_min"), (int, float)):
+        where.append("s.soc >= %s")
+        params.append(filters["soc_min"])
+    search = str(filters.get("search") or "").strip()
+    if search:
+        where.append("(s.device_id ILIKE %s OR d.label ILIKE %s)")
+        params.extend([f"%{search}%", f"%{search}%"])
+    where_sql = ("WHERE " + " AND ".join(where)) if where else ""
+
+    rows = query(
+        f"""
+        SELECT s.device_id, d.label, d.model, d.site,
+               s.soc, s.pack_voltage, s.current_a, s.temperature_c,
+               s.status, s.active_alarms, s.ts
+        FROM device_status s JOIN devices d USING (device_id)
+        {where_sql}
+        ORDER BY CASE s.status WHEN 'critical' THEN 0 WHEN 'warning' THEN 1 ELSE 2 END,
+                 s.soc ASC
+        LIMIT 200
+        """,
+        tuple(params),
+    )
+    return {"explanation": filters.get("explanation", ""), "filters": filters,
+            "count": len(rows), "devices": rows}
+
+
+@app.post("/api/ai/briefing")
+def ai_briefing(user: dict = Depends(auth.require_user)) -> dict:
+    """AI fleet-health briefing, grounded in live stats."""
+    if not ai.check_rate_limit(user["email"]):
+        raise HTTPException(429, "Too many AI requests — please wait a minute.")
+    summary = query_one(
+        """
+        SELECT count(*) AS total,
+               count(*) FILTER (WHERE status = 'ok')       AS ok,
+               count(*) FILTER (WHERE status = 'warning')  AS warning,
+               count(*) FILTER (WHERE status = 'critical') AS critical,
+               COALESCE(sum(active_alarms), 0)             AS active_alarms
+        FROM device_status
+        """
+    )
+    worst = query(
+        """
+        SELECT s.device_id, d.label, d.company, d.equipment, d.site,
+               s.soc, s.pack_voltage, s.temperature_c, s.status, s.active_alarms
+        FROM device_status s JOIN devices d USING (device_id)
+        WHERE s.status <> 'ok'
+        ORDER BY CASE s.status WHEN 'critical' THEN 0 ELSE 1 END, s.soc ASC
+        LIMIT 8
+        """
+    )
+    alarm_counts = query(
+        "SELECT code, count(*) AS n FROM alarms WHERE cleared_at IS NULL GROUP BY code ORDER BY n DESC"
+    )
+    stats = {"summary": summary, "worst_packs": worst, "active_alarms_by_type": alarm_counts}
+    try:
+        text = ai.fleet_briefing(stats)
+    except ai.AIError as e:
+        raise HTTPException(e.status, e.message)
+    return {"briefing": text, "stats": stats}
+
+
+# ---- Notes (per-user CRUD on a pack) ---------------------------------------
+
+class NoteBody(BaseModel):
+    body: str
+
+
+def _clean_note(text: str) -> str:
+    text = (text or "").strip()
+    if not text:
+        raise HTTPException(422, "Note cannot be empty.")
+    if len(text) > 2000:
+        raise HTTPException(422, "Note too long (max 2000 characters).")
+    return text
+
+
+@app.get("/api/devices/{device_id}/notes")
+def list_notes(device_id: str, user: dict = Depends(auth.require_user)) -> dict:
+    rows = query(
+        "SELECT id, device_id, body, created_at, updated_at FROM notes "
+        "WHERE device_id = %s AND user_id = %s ORDER BY updated_at DESC",
+        (device_id, user["id"]),
+    )
+    return {"count": len(rows), "notes": rows}
+
+
+@app.post("/api/devices/{device_id}/notes")
+def create_note(device_id: str, body: NoteBody, user: dict = Depends(auth.require_user)) -> dict:
+    text = _clean_note(body.body)
+    if query_one("SELECT 1 FROM devices WHERE device_id = %s", (device_id,)) is None:
+        raise HTTPException(404, f"device {device_id!r} not found")
+    return query_one(
+        "INSERT INTO notes (user_id, device_id, body) VALUES (%s, %s, %s) "
+        "RETURNING id, device_id, body, created_at, updated_at",
+        (user["id"], device_id, text),
+    )
+
+
+@app.put("/api/notes/{note_id}")
+def update_note(note_id: int, body: NoteBody, user: dict = Depends(auth.require_user)) -> dict:
+    text = _clean_note(body.body)
+    row = query_one(
+        "UPDATE notes SET body = %s, updated_at = now() WHERE id = %s AND user_id = %s "
+        "RETURNING id, device_id, body, created_at, updated_at",
+        (text, note_id, user["id"]),
+    )
+    if row is None:
+        raise HTTPException(404, "note not found")
+    return row
+
+
+@app.delete("/api/notes/{note_id}")
+def delete_note(note_id: int, user: dict = Depends(auth.require_user)) -> dict:
+    row = query_one(
+        "DELETE FROM notes WHERE id = %s AND user_id = %s RETURNING id",
+        (note_id, user["id"]),
+    )
+    if row is None:
+        raise HTTPException(404, "note not found")
+    return {"deleted": row["id"]}
+
+
+# ---- Reporting & export ----------------------------------------------------
+
+FLEET_EXPORT_COLS = [
+    "device_id", "label", "model", "site", "company", "equipment",
+    "soc", "pack_voltage", "current_a", "temperature_c", "status", "active_alarms", "ts",
+]
+
+XLSX_MEDIA = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+
+
+def _fleet_export_rows(status, site, q):
+    where, params = [], []
+    if status in VALID_STATUS:
+        where.append("s.status = %s")
+        params.append(status)
+    if site:
+        where.append("d.site = %s")
+        params.append(site)
+    if q:
+        where.append("(s.device_id ILIKE %s OR d.label ILIKE %s)")
+        params.extend([f"%{q}%", f"%{q}%"])
+    where_sql = ("WHERE " + " AND ".join(where)) if where else ""
+    return query(
+        f"""
+        SELECT s.device_id, d.label, d.model, d.site, d.company, d.equipment,
+               s.soc, s.pack_voltage, s.current_a, s.temperature_c, s.status,
+               s.active_alarms, s.ts
+        FROM device_status s JOIN devices d USING (device_id)
+        {where_sql}
+        ORDER BY CASE s.status WHEN 'critical' THEN 0 WHEN 'warning' THEN 1 ELSE 2 END,
+                 s.soc ASC
+        """,
+        tuple(params),
+    )
+
+
+def _daily_report_rows(day):
+    if day:
+        return query(
+            "SELECT * FROM daily_pack_report WHERE report_date = %s ORDER BY pack_number",
+            (day,),
+        )
+    return query("SELECT * FROM daily_pack_report WHERE report_date = CURRENT_DATE ORDER BY pack_number")
+
+
+def _export_response(fmt: str, headers: list, rows: list, basename: str):
+    if fmt == "csv":
+        content = exports.rows_to_csv(headers, rows)
+        return Response(
+            content=content, media_type="text/csv; charset=utf-8",
+            headers={"Content-Disposition": f'attachment; filename="{basename}.csv"'},
+        )
+    data = exports.rows_to_xlsx(headers, rows, basename)
+    return Response(
+        content=data, media_type=XLSX_MEDIA,
+        headers={"Content-Disposition": f'attachment; filename="{basename}.xlsx"'},
+    )
+
+
+@app.get("/api/daily-report")
+def daily_report(date: Optional[str] = None, _user: dict = Depends(auth.require_user)) -> dict:
+    """Daily per-pack report (JSON) for the UI. Defaults to today."""
+    rows = _daily_report_rows(date)
+    report_date = date or (str(rows[0]["report_date"]) if rows else None)
+    return {"date": report_date, "count": len(rows), "rows": rows}
+
+
+@app.get("/api/export/fleet.{fmt}")
+def export_fleet(
+    fmt: str,
+    status: Optional[str] = None,
+    site: Optional[str] = None,
+    q: Optional[str] = None,
+    _user: dict = Depends(auth.require_user),
+):
+    if fmt not in ("csv", "xlsx"):
+        raise HTTPException(404, "format must be csv or xlsx")
+    if status is not None and status not in VALID_STATUS:
+        raise HTTPException(422, f"invalid status; expected one of {sorted(VALID_STATUS)}")
+    rows = _fleet_export_rows(status, site, q)
+    return _export_response(fmt, FLEET_EXPORT_COLS, rows, "fleet")
+
+
+@app.get("/api/export/daily-report.{fmt}")
+def export_daily_report(
+    fmt: str,
+    date: Optional[str] = None,
+    _user: dict = Depends(auth.require_user),
+):
+    if fmt not in ("csv", "xlsx"):
+        raise HTTPException(404, "format must be csv or xlsx")
+    rows = _daily_report_rows(date)
+    headers = list(rows[0].keys()) if rows else [
+        "report_date", "pack_number", "pack_label", "model", "company", "equipment", "location",
+    ]
+    return _export_response(fmt, headers, rows, "daily_pack_report")
