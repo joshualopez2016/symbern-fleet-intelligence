@@ -176,6 +176,16 @@ Downloads carry `Content-Disposition: attachment`. The frontend fetches them wit
 the Bearer token and saves the returned blob. (PDF is handled client-side via
 browser Print / Save-as-PDF of the report view.)
 
+## Production test records (manufacturing / QA)
+Simulated, cloud-safe. All require auth.
+
+- **GET /api/production/records** ?product=&part_number=&serial=&from=&to=&station=&fixture=&test_parameter=&result=&limit=&offset= → `{ total, count, records: [...] }` (Pass/Fail lookup)
+- **GET /api/production/summary** ?date= → `{ date, total_tested, passed, failed, pass_pct, fail_pct, most_failed_product, most_failed_fixture, most_failed_station }` (defaults to most recent test date)
+- **GET /api/production/serial/{serial}** → `{ serial_number, product, tests, passed, failed, records: [...] }` (full history; `404` if unknown)
+- **GET /api/production/search** ?q= → cross-entity search over serial / part / product / station / fixture / operator
+- **GET /api/export/production.{csv|xlsx}** — same filters as records
+- Query builder: `production` source
+
 ## Error shape
 FastAPI default: `{ "detail": "<message>" }` with `404` (unknown device) or `422`
 (invalid enum / out-of-range param).

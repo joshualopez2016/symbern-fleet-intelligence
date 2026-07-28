@@ -217,6 +217,37 @@ def test_query_requires_auth():
     assert r.status_code == 401
 
 
+# ---- production test records -----------------------------------------------
+
+def test_production_records_filter(admin):
+    r = requests.get(f"{BASE}/api/production/records?result=Fail&limit=50", headers=admin, timeout=15)
+    assert r.status_code == 200
+    assert all(rec["result"] == "Fail" for rec in r.json()["records"])
+
+
+def test_production_summary(admin):
+    r = requests.get(f"{BASE}/api/production/summary", headers=admin, timeout=15)
+    assert r.status_code == 200
+    b = r.json()
+    assert b["passed"] + b["failed"] == b["total_tested"]
+
+
+def test_production_serial_history(admin):
+    serial = requests.get(f"{BASE}/api/production/records?limit=1", headers=admin, timeout=15).json()["records"][0]["serial_number"]
+    r = requests.get(f"{BASE}/api/production/serial/{serial}", headers=admin, timeout=15)
+    assert r.status_code == 200 and r.json()["tests"] > 0
+    assert requests.get(f"{BASE}/api/production/serial/NOPE-XXX", headers=admin, timeout=15).status_code == 404
+
+
+def test_production_search(admin):
+    r = requests.get(f"{BASE}/api/production/search?q=FIX-C", headers=admin, timeout=15)
+    assert r.status_code == 200 and r.json()["count"] > 0
+
+
+def test_production_requires_auth():
+    assert requests.get(f"{BASE}/api/production/summary", timeout=15).status_code == 401
+
+
 # ---- notes CRUD ------------------------------------------------------------
 
 def test_notes_full_crud(admin, device_id):

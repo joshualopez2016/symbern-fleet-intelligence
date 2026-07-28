@@ -758,3 +758,177 @@ def export_daily_report(
         "report_date", "pack_number", "pack_label", "model", "company", "equipment", "location",
     ]
     return _export_response(fmt, headers, rows, "daily_pack_report")
+
+
+# ---- Production Test Records (manufacturing / QA) ---------------------------
+
+VALID_RESULT = {"Pass", "Fail"}
+PRODUCTION_COLS = [
+    "id", "ts", "product", "part_number", "serial_number", "station", "fixture",
+    "operator", "test_parameter", "result", "measured_value", "limit_low",
+    "limit_high", "failure_reason",
+]
+
+
+def _production_where(product, part_number, serial, date_from, date_to,
+                      station, fixture, test_parameter, result):
+    where, params = [], []
+    for col, val in (("product", product), ("part_number", part_number),
+                     ("station", station), ("fixture", fixture),
+                     ("test_parameter", test_parameter)):
+        if val:
+            where.append(f"{col} = %s")
+            params.append(val)
+    if serial:
+        where.append("serial_number ILIKE %s")
+        params.append(f"%{serial}%")
+    if result in VALID_RESULT:
+        where.append("result = %s")
+        params.append(result)
+    if date_from:
+        where.append("ts::date >= %s")
+        params.append(date_from)
+    if date_to:
+        where.append("ts::date <= %s")
+        params.append(date_to)
+    return (("WHERE " + " AND ".join(where)) if where else ""), params
+
+
+@app.get("/api/production/records")
+def production_records(
+    product: Optional[str] = None,
+    part_number: Optional[str] = None,
+    serial: Optional[str] = None,
+    date_from: Optional[str] = Query(None, alias="from"),
+    date_to: Optional[str] = Query(None, alias="to"),
+    station: Optional[str] = None,
+    fixture: Optional[str] = None,
+    test_parameter: Optional[str] = None,
+    result: Optional[str] = None,
+    limit: int = Query(200, ge=1, le=2000),
+    offset: int = Query(0, ge=0),
+    _user: dict = Depends(auth.require_user),
+) -> dict:
+    """Pass/Fail lookup with filters."""
+    if result is not None and result not in VALID_RESULT:
+        raise HTTPException(422, "result must be Pass or Fail")
+    where_sql, params = _production_where(product, part_number, serial, date_from,
+                                          date_to, station, fixture, test_parameter, result)
+    total = query_one(f"SELECT count(*) AS n FROM test_records {where_sql}", tuple(params))["n"]
+    rows = query(
+        f"SELECT {', '.join(PRODUCTION_COLS)} FROM test_records {where_sql} "
+        f"ORDER BY ts DESC LIMIT %s OFFSET %s",
+        tuple(params) + (limit, offset),
+    )
+    return {"total": total, "count": len(rows), "records": rows}
+
+
+def _most_failed(dim: str, day) -> Optional[dict]:
+    row = query_one(
+        f"SELECT {dim} AS name, count(*) FILTER (WHERE result = 'Fail') AS fails "
+        f"FROM test_records WHERE ts::date = %s GROUP BY {dim} "
+        f"ORDER BY fails DESC NULLS LAST LIMIT 1",
+        (day,),
+    )
+    return row if row and row["fails"] else None
+
+
+@app.get("/api/production/summary")
+def production_summary(date: Optional[str] = None,
+                       _user: dict = Depends(auth.require_user)) -> dict:
+    """Daily Production Summary. Defaults to the most recent test date."""
+    day = date
+    if not day:
+        r = query_one("SELECT max(ts::date) AS d FROM test_records")
+        day = str(r["d"]) if r and r["d"] else None
+    if not day:
+        return {"date": None, "total_tested": 0, "passed": 0, "failed": 0,
+                "pass_pct": 0, "fail_pct": 0}
+    t = query_one(
+        """
+        SELECT count(*) AS total,
+               count(*) FILTER (WHERE result = 'Pass') AS passed,
+               count(*) FILTER (WHERE result = 'Fail') AS failed
+        FROM test_records WHERE ts::date = %s
+        """,
+        (day,),
+    )
+    total = t["total"] or 0
+    return {
+        "date": str(day),
+        "total_tested": total,
+        "passed": t["passed"] or 0,
+        "failed": t["failed"] or 0,
+        "pass_pct": round(100.0 * (t["passed"] or 0) / total, 1) if total else 0,
+        "fail_pct": round(100.0 * (t["failed"] or 0) / total, 1) if total else 0,
+        "most_failed_product": _most_failed("product", day),
+        "most_failed_fixture": _most_failed("fixture", day),
+        "most_failed_station": _most_failed("station", day),
+    }
+
+
+@app.get("/api/production/serial/{serial}")
+def production_serial(serial: str, _user: dict = Depends(auth.require_user)) -> dict:
+    """Full chronological test history for one unit."""
+    rows = query(
+        f"SELECT {', '.join(PRODUCTION_COLS)} FROM test_records "
+        f"WHERE serial_number = %s ORDER BY ts",
+        (serial,),
+    )
+    if not rows:
+        raise HTTPException(404, f"no records for serial {serial!r}")
+    passed = sum(1 for r in rows if r["result"] == "Pass")
+    return {
+        "serial_number": serial,
+        "product": rows[0]["product"],
+        "part_number": rows[0]["part_number"],
+        "tests": len(rows),
+        "passed": passed,
+        "failed": len(rows) - passed,
+        "records": rows,
+    }
+
+
+@app.get("/api/production/search")
+def production_search(q: str, limit: int = Query(100, ge=1, le=500),
+                      _user: dict = Depends(auth.require_user)) -> dict:
+    """Universal search across serial / part / product / station / fixture / operator."""
+    term = (q or "").strip()
+    if not term:
+        raise HTTPException(400, "Please provide a search term.")
+    like = f"%{term}%"
+    rows = query(
+        f"""
+        SELECT {', '.join(PRODUCTION_COLS)} FROM test_records
+        WHERE serial_number ILIKE %s OR part_number ILIKE %s OR product ILIKE %s
+           OR station ILIKE %s OR fixture ILIKE %s OR operator ILIKE %s
+        ORDER BY ts DESC LIMIT %s
+        """,
+        (like, like, like, like, like, like, limit),
+    )
+    return {"query": term, "count": len(rows), "records": rows}
+
+
+@app.get("/api/export/production.{fmt}")
+def export_production(
+    fmt: str,
+    product: Optional[str] = None,
+    part_number: Optional[str] = None,
+    serial: Optional[str] = None,
+    date_from: Optional[str] = Query(None, alias="from"),
+    date_to: Optional[str] = Query(None, alias="to"),
+    station: Optional[str] = None,
+    fixture: Optional[str] = None,
+    test_parameter: Optional[str] = None,
+    result: Optional[str] = None,
+    _user: dict = Depends(auth.require_user),
+):
+    if fmt not in ("csv", "xlsx"):
+        raise HTTPException(404, "format must be csv or xlsx")
+    where_sql, params = _production_where(product, part_number, serial, date_from,
+                                          date_to, station, fixture, test_parameter, result)
+    rows = query(
+        f"SELECT {', '.join(PRODUCTION_COLS)} FROM test_records {where_sql} ORDER BY ts DESC",
+        tuple(params),
+    )
+    return _export_response(fmt, PRODUCTION_COLS, rows, "test_records")
