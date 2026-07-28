@@ -217,6 +217,29 @@ def test_query_requires_auth():
     assert r.status_code == 401
 
 
+# ---- support assistant + tickets -------------------------------------------
+
+def test_assistant_requires_auth():
+    r = requests.post(f"{BASE}/api/assistant/chat",
+                      json={"messages": [{"role": "user", "content": "hi"}]}, timeout=15)
+    assert r.status_code == 401
+
+
+def test_ticket_create_and_list(admin):
+    created = requests.post(f"{BASE}/api/support/tickets", headers=admin,
+                            json={"subject": "pytest", "category": "IT", "body": "test body"}, timeout=15)
+    assert created.status_code == 200
+    tid = created.json()["id"]
+    lst = requests.get(f"{BASE}/api/support/tickets", headers=admin, timeout=15).json()
+    assert any(t["id"] == tid for t in lst["tickets"])
+
+
+def test_ticket_bad_category(admin):
+    r = requests.post(f"{BASE}/api/support/tickets", headers=admin,
+                      json={"subject": "x", "category": "Nope", "body": "y"}, timeout=15)
+    assert r.status_code == 422
+
+
 # ---- production test records -----------------------------------------------
 
 def test_production_records_filter(admin):

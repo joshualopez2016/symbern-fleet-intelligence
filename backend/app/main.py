@@ -576,6 +576,72 @@ def ai_briefing(user: dict = Depends(auth.require_user)) -> dict:
     return {"briefing": text, "stats": stats}
 
 
+# ---- Support assistant (chatbot) + tickets ---------------------------------
+
+class ChatMessage(BaseModel):
+    role: str
+    content: str
+
+
+class ChatBody(BaseModel):
+    messages: list[ChatMessage]
+
+
+@app.post("/api/assistant/chat")
+def assistant_chat(body: ChatBody, user: dict = Depends(auth.require_user)) -> dict:
+    if not ai.check_rate_limit(user["email"]):
+        raise HTTPException(429, "Too many AI requests — please wait a minute.")
+    msgs = [
+        {"role": m.role if m.role in ("user", "assistant") else "user",
+         "content": (m.content or "")[:2000]}
+        for m in body.messages if (m.content or "").strip()
+    ][-12:]
+    if not msgs:
+        raise HTTPException(400, "Please type a message.")
+    try:
+        return {"reply": ai.assistant_reply(msgs)}
+    except ai.AIError as e:
+        raise HTTPException(e.status, e.message)
+
+
+class NewTicket(BaseModel):
+    subject: str
+    category: str = "IT"
+    body: str
+
+
+@app.post("/api/support/tickets")
+def create_ticket(t: NewTicket, user: dict = Depends(auth.require_user)) -> dict:
+    subject = (t.subject or "").strip()
+    body = (t.body or "").strip()
+    if not subject or not body:
+        raise HTTPException(422, "subject and description are required")
+    if t.category not in ("IT", "Management", "Other"):
+        raise HTTPException(422, "category must be IT, Management, or Other")
+    return query_one(
+        "INSERT INTO tickets (user_id, user_email, subject, category, body) "
+        "VALUES (%s, %s, %s, %s, %s) "
+        "RETURNING id, subject, category, status, created_at",
+        (user["id"], user["email"], subject[:200], t.category, body[:4000]),
+    )
+
+
+@app.get("/api/support/tickets")
+def list_tickets(user: dict = Depends(auth.require_user)) -> dict:
+    if user["role"] in ("administrator", "supervisor"):
+        rows = query(
+            "SELECT id, user_email, subject, category, status, created_at "
+            "FROM tickets ORDER BY created_at DESC LIMIT 200"
+        )
+    else:
+        rows = query(
+            "SELECT id, user_email, subject, category, status, created_at "
+            "FROM tickets WHERE user_id = %s ORDER BY created_at DESC",
+            (user["id"],),
+        )
+    return {"count": len(rows), "tickets": rows}
+
+
 # ---- Notes (per-user CRUD on a pack) ---------------------------------------
 
 class NoteBody(BaseModel):

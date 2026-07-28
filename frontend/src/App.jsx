@@ -11,6 +11,7 @@ import FilterPanel from './components/FilterPanel'
 import QueryBuilder from './components/QueryBuilder'
 import UserAdmin from './components/UserAdmin'
 import Production from './components/Production'
+import Assistant from './components/Assistant'
 import Login from './components/Login'
 
 const POLL_MS = 3000
@@ -284,6 +285,8 @@ function Dashboard({ user, onLogout }) {
         <span className="foot-brand">Symbern</span> — Batteries. Equipment. Intelligence.
         <span className="foot-sep">·</span> We power modern logistics.
       </footer>
+
+      <Assistant />
     </div>
   )
 }

@@ -257,3 +257,14 @@ export function aiSearch(query) {
 export function aiBriefing() {
   return sendJSON('POST', '/api/ai/briefing', {})
 }
+
+// --- support assistant (chatbot) + tickets ---
+export function assistantChat(messages) {
+  return sendJSON('POST', '/api/assistant/chat', { messages })
+}
+export function createTicket(subject, category, body) {
+  return sendJSON('POST', '/api/support/tickets', { subject, category, body })
+}
+export function listTickets() {
+  return getJSON('/api/support/tickets')
+}
