@@ -83,8 +83,13 @@ Hand_Held / FLY / Boat, real stations/fixtures/serials). Per the standing rule
 - This is exactly the two-track split already in play (demo data public, real data
   local).
 
-## 8. Phasing
-- **P1** — schema + production simulator (verify records land)
-- **P2** — API (records / summary / serial / search) + query-builder source
-- **P3** — UI (mode switch + production views)
-- **P4** — export + tests + docs
+## 8. Phasing — ✅ complete
+- **P1 ✅** — `test_records` schema + `production_sim.py` (3,000 records / 600 units)
+- **P2 ✅** — API (`/api/production/records|summary|serial/{serial}|search`, export)
+  + `production` query-builder source (+5 tests)
+- **P3 ✅** — UI: Fleet↔Production switch, summary tiles + most-failed, Pass/Fail
+  table with filters, universal search, serial drill-down, CSV/Excel export
+- **P4 ✅** — docs/README polish
+
+Data is **simulated, Symbern-branded, cloud-safe**. The same code could ingest a
+real MES/test-bench feed on-prem (separate data source + `.env`), never committed.

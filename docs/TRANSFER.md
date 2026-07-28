@@ -36,6 +36,12 @@ Captured in `backend/requirements.txt` and `simulator/requirements.txt`:
 
 New backend file: `app/exports.py`. New frontend file: `components/DailyReport.jsx`.
 
+Production Test Records domain: `sql/production.sql`, `simulator/production_sim.py`,
+`backend/app/querybuilder.py` (production source), `frontend/components/Production.jsx`.
+Realtime: `frontend/useFleetSocket.js`. Query builder: `backend/app/querybuilder.py`,
+`frontend/components/QueryBuilder.jsx`. Filters: `frontend/components/FilterPanel.jsx`.
+Auth/admin: `backend/app/auth.py`, `backend/create_user.py`, `frontend/components/{Login,UserAdmin}.jsx`.
+
 New env vars (in `.env`): `TRUSSED_API_KEY` (required for AI features; server-side
 only), optional `TRUSSED_MODEL` (default gpt-5.4) / `TRUSSED_BASE_URL`.
 DB objects added: `notes` table (`sql/notes.sql`).

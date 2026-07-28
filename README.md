@@ -1,27 +1,45 @@
 # BMS Cloud Dashboard
 
-A full-stack proof-of-concept for monitoring a fleet of battery management
-systems (BMS) in real time. Fleet managers see every battery's health at a
-glance and drill into any device's history. **All telemetry is simulated** — a
-standalone generator produces plausible data; no real hardware or customer data
-is involved.
+A full-stack proof-of-concept **fleet-battery intelligence platform**, built for
+**Symbern** — *"Batteries. Equipment. Intelligence."* It covers a unit's whole
+lifecycle across two data domains behind one shell:
+
+- **Fleet Intelligence** — real-time monitoring of deployed battery packs (state
+  of charge, voltage, temperature, alarms), with live **WebSocket** updates.
+- **Production Test Records** — manufacturing/QA test history: pass/fail at
+  stations & fixtures, by operator, serial-traceable (Pass/Fail lookup, daily
+  production summary, serial history, universal search).
+
+**All data is simulated** — standalone generators produce plausible data; no real
+hardware or customer data is involved (cloud-safe).
 
 **Author:** Joshua Lopez · Z23384309 · Joshualopez2016@fau.edu
 
-Pipeline: **Simulator → PostgreSQL → FastAPI → React**. The simulator is the only
-writer; the API is read-only. Swapping the simulator for a real telemetry feed
-would leave the schema, API, and UI untouched.
+Pipeline: **Simulators → PostgreSQL → FastAPI → React**. Also includes JWT auth
+with enforced roles, a no-code query builder, AI features (FAU Trussed.ai), and
+reporting/export. Swapping a simulator for a real feed leaves the schema, API,
+and UI untouched.
 
 ```
 BMS-Cloud-Dashboard/          ← self-contained; copy this one folder to move the project
-├── docs/          DESIGN.md, API_ENDPOINTS.md
-├── sql/           schema.sql  (DDL + indexes)
-├── simulator/     simulator.py  (standalone telemetry generator)
-├── backend/       FastAPI read API + config/thresholds.py
-├── frontend/      React (Vite) dashboard
-├── .env.example   copy to .env and fill in (real .env is git-ignored)
+├── docs/       DESIGN, API_ENDPOINTS, SCALE, SECURITY, TESTING, TRANSFER, PRODUCTION_SCOPE
+├── sql/        schema · auth · notes · roles · daily_report · production
+├── simulator/  simulator.py (telemetry) · production_sim.py (QA test records)
+├── backend/    FastAPI app (app/) + config/thresholds.py
+├── frontend/   React (Vite) dashboard
+├── tests/      pytest suite + Postman/Thunder collection
+├── .env.example  copy to .env and fill in (real .env is git-ignored)
 └── README.md
 ```
+
+## Feature overview
+Auth (JWT) + enforced roles (viewer/engineer/supervisor/administrator) · user
+management · fleet grid + drill-down trend charts · configurable alert thresholds
+· active-alerts panel · advanced filters · **AI** (NL fleet search + fleet
+briefing) · reporting & export (CSV/Excel/PDF-print) · **no-code query builder**
+(read-only role) · **WebSocket realtime** · daily pack report · **Production Test
+Records** domain. Security self-cert in [docs/SECURITY.md](docs/SECURITY.md);
+tests in [docs/TESTING.md](docs/TESTING.md).
 
 ---
 
@@ -41,13 +59,19 @@ Create an app role + database, then load the schema:
 # as a postgres superuser
 psql -c "CREATE ROLE bms_app LOGIN PASSWORD 'CHANGE_ME';"
 psql -c "CREATE DATABASE bms OWNER bms_app;"
-# load tables + indexes
-psql "postgresql://bms_app:CHANGE_ME@127.0.0.1:5432/bms" -f sql/schema.sql
+# load all schema objects (as bms_app)
+DB="postgresql://bms_app:CHANGE_ME@127.0.0.1:5432/bms"
+psql "$DB" -f sql/schema.sql -f sql/auth.sql -f sql/notes.sql \
+           -f sql/daily_report.sql -f sql/production.sql
+# read-only role for the query builder (as a superuser)
+psql -d bms -f sql/roles.sql
 ```
 
 ### 2. Environment
 ```bash
-cp .env.example .env      # then edit DATABASE_URL to match the password above
+cp .env.example .env
+# edit DATABASE_URL + READONLY_DATABASE_URL to match your passwords, set a
+# JWT_SECRET (any long random string), and TRUSSED_API_KEY for the AI features.
 ```
 
 ### 3. Python (backend + simulator)
@@ -64,11 +88,20 @@ py -m pip install -r simulator/requirements.txt
 cd frontend && npm install
 ```
 
-## Running (three processes)
-
+## Seed data & users (once)
 ```bash
-# 1) seed + stream telemetry
-py simulator/simulator.py --reset --fleet-size 30 --interval 2
+# telemetry fleet (or run live below), and the production QA test records
+py simulator/simulator.py --reset --fleet-size 30 --seed-only
+py simulator/production_sim.py --reset --units 600 --days 14
+# create login users
+py backend/create_user.py admin@bms.local  Admin#2026  administrator
+py backend/create_user.py viewer@bms.local Viewer#2026 viewer
+```
+
+## Running (three processes)
+```bash
+# 1) stream live telemetry
+py simulator/simulator.py --fleet-size 30 --interval 2
 
 # 2) API (from repo root)
 cd backend && py -m uvicorn app.main:app --host 127.0.0.1 --port 8000
@@ -77,12 +110,13 @@ cd backend && py -m uvicorn app.main:app --host 127.0.0.1 --port 8000
 cd frontend && npm run dev        # http://localhost:5173
 ```
 
-The Vite dev server proxies `/api` to the backend on :8000, so open only
-**http://localhost:5173**.
+The Vite dev server proxies `/api` (and the `/api/ws` WebSocket) to the backend on
+:8000, so open only **http://localhost:5173**. Use the **Fleet / Production**
+switch in the header to move between the two domains.
 
-Simulator flags: `--fleet-size N`, `--interval SECONDS`, `--ticks N` (0 = forever),
-`--reset` (truncate + reseed), `--seed-only`. Without `--reset` it resumes each
-pack's state from the last snapshot.
+Telemetry simulator flags: `--fleet-size N`, `--interval SECONDS`, `--ticks N`
+(0 = forever), `--reset`, `--seed-only`. Without `--reset` it resumes each pack's
+state. Production simulator: `--units N`, `--days D`, `--reset`.
 
 ## Where things are configured
 - **Alert thresholds:** [`backend/config/thresholds.py`](backend/config/thresholds.py)
