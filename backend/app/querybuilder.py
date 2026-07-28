@@ -11,7 +11,7 @@ sources/fields/operators are reachable — so there is no injection surface.
 """
 from __future__ import annotations
 
-from .db import query
+from .db import query_ro
 
 
 class QBError(Exception):
@@ -189,5 +189,5 @@ def build_and_run(spec: dict) -> dict:
     limit = max(1, min(limit, MAX_LIMIT))
 
     sql = f"SELECT {select_sql} FROM {src['from']} {where_sql} {order_sql} LIMIT {limit}".strip()
-    rows = query(sql, tuple(params))
+    rows = query_ro(sql, tuple(params))  # runs on the read-only role — cannot write
     return {"columns": columns, "rows": rows, "count": len(rows), "sql": sql, "params": params}

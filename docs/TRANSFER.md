@@ -65,8 +65,11 @@ Declared in `frontend/package.json`:
 
 ## 2. Database objects (recreate with the README setup steps)
 - Role `bms_app` (LOGIN) — dev password in `.env`.
+- Role `bms_readonly` (LOGIN, SELECT-only) — from `sql/roles.sql`; used by the
+  query builder. Connection string in `.env` as `READONLY_DATABASE_URL`.
 - Database `bms` (owner `bms_app`).
-- Tables + indexes from `sql/schema.sql`.
+- Tables + indexes from `sql/schema.sql`; `sql/auth.sql`, `sql/notes.sql`,
+  `sql/daily_report.sql`, `sql/roles.sql`.
 
 ## 3. Project files created (all inside `BMS-Cloud-Dashboard/`, this is what you copy)
 ```

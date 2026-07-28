@@ -95,15 +95,20 @@ function Dashboard({ user, onLogout }) {
   }
 
   // Whole-fleet tallies — one cheap aggregate, independent of paging.
-  const { data: summary } = usePolling(fetchFleetSummary, POLL_MS, [])
+  const { data: summary, refresh: refreshSummary } = usePolling(fetchFleetSummary, POLL_MS, [])
 
   // The grid page — server does the filtering, worst-first sort, and pagination,
   // so the payload is capped at PAGE rows no matter how large the fleet is.
-  const { data: fleet, error, loading } = usePolling(
+  const { data: fleet, error, loading, refresh: refreshFleet } = usePolling(
     () => fetchFleet({ ...fleetParams, limit: PAGE, offset }),
     POLL_MS,
     [statusFilter, debouncedSearch, offset, filters],
   )
+
+  const refreshNow = () => {
+    refreshFleet()
+    refreshSummary()
+  }
 
   const devices = fleet?.devices ?? []
   const gridDevices = aiResult ? aiResult.devices : devices
@@ -208,6 +213,7 @@ function Dashboard({ user, onLogout }) {
           <span />
         )}
         <div className="fleet-actions">
+          <button className="pager-btn" onClick={refreshNow} title="Refresh now">↻ Refresh</button>
           <button className="pager-btn" onClick={() => exportFleet('csv', fleetParams)}>⬇ CSV</button>
           <button className="pager-btn" onClick={() => exportFleet('xlsx', fleetParams)}>⬇ Excel</button>
           <button className="pager-btn" onClick={() => setShowReport(true)}>📄 Daily Report</button>

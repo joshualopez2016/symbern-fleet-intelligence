@@ -22,7 +22,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from . import ai, auth, exports, querybuilder
-from .db import pool, query, query_one
+from .db import pool, ro_pool, query, query_one
 
 import sys
 from pathlib import Path
@@ -40,8 +40,10 @@ VALID_SEVERITY = {"info", "warning", "critical"}
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     pool.open()
+    ro_pool.open()
     yield
     pool.close()
+    ro_pool.close()
 
 
 app = FastAPI(title="BMS Cloud Dashboard API", version="0.1.0", lifespan=lifespan)

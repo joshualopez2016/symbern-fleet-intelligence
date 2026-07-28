@@ -30,6 +30,11 @@ evidence that supports each. Verified 2026-07-27.
   user never contributes SQL text, only bound values.
 - The simulator's bulk writes are chunked **multi-row parameterized inserts**
   (`(%s, …), (%s, …)`), not string concatenation.
+- **Defense in depth:** the ad-hoc **query builder** runs on a dedicated
+  least-privilege **read-only** Postgres role (`bms_readonly`, `sql/roles.sql`) that
+  has `SELECT` only — so even a hypothetical bug there physically cannot modify
+  data (verified: `UPDATE` → "permission denied"). Query specs are also
+  whitelist-validated against a field registry before any SQL is built.
 
 ## 3. XSS hygiene
 - The UI is React, which **escapes all interpolated values by default**.

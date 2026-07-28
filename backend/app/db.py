@@ -38,20 +38,25 @@ def _conn_params(url: str) -> dict:
 
 
 _PARAMS = _conn_params(DATABASE_URL)
+# Optional least-privilege read-only role for the query builder; falls back to
+# the main role if not configured.
+_RO_URL = os.environ.get("READONLY_DATABASE_URL")
+_RO_PARAMS = _conn_params(_RO_URL) if _RO_URL else _PARAMS
 
 
 class _Pool:
     """Fixed-size blocking pool. Connections are autocommit (the API only reads),
     so a connection is always returned in a clean, reusable state."""
 
-    def __init__(self, size: int = 5):
+    def __init__(self, params: dict, size: int = 5):
+        self._params = params
         self._size = size
         self._q: queue.Queue = queue.Queue(maxsize=size)
         self._lock = threading.Lock()
         self._opened = False
 
     def _new(self):
-        conn = pg8000.dbapi.connect(**_PARAMS)
+        conn = pg8000.dbapi.connect(**self._params)
         conn.autocommit = True
         return conn
 
@@ -83,7 +88,8 @@ class _Pool:
             self._opened = False
 
 
-pool = _Pool(size=5)
+pool = _Pool(_PARAMS, size=5)
+ro_pool = _Pool(_RO_PARAMS, size=3)  # read-only (query builder)
 
 
 def _floatify(row: dict | None) -> dict | None:
@@ -100,6 +106,17 @@ def _dictify(cur) -> list[dict]:
 
 def query(sql: str, params: tuple = ()) -> list[dict]:
     with pool.connection() as conn:
+        cur = conn.cursor()
+        try:
+            cur.execute(sql, params)
+            return _dictify(cur)
+        finally:
+            cur.close()
+
+
+def query_ro(sql: str, params: tuple = ()) -> list[dict]:
+    """Run a read on the least-privilege read-only pool (query builder)."""
+    with ro_pool.connection() as conn:
         cur = conn.cursor()
         try:
             cur.execute(sql, params)
