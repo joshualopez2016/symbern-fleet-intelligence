@@ -192,6 +192,20 @@ export function fetchFilterOptions() {
   return getJSON('/api/fleet/filter-options')
 }
 
+// --- user management (admin only) ---
+export function listUsers() {
+  return getJSON('/api/users')
+}
+export function createUser(email, password, role) {
+  return sendJSON('POST', '/api/users', { email, password, role })
+}
+export function updateUserRole(id, role) {
+  return sendJSON('PUT', `/api/users/${id}`, { role })
+}
+export function deleteUser(id) {
+  return sendJSON('DELETE', `/api/users/${id}`)
+}
+
 // --- query builder ---
 export function querySources() {
   return getJSON('/api/query/sources')

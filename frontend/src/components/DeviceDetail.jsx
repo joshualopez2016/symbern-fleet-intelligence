@@ -22,7 +22,7 @@ function toPoint(r) {
 // charts. History loads once, then only NEW readings are fetched each poll
 // (?since= cursor) and appended — the incremental-fetch pattern, not refetching
 // the whole series every tick.
-export default function DeviceDetail({ deviceId, onClose }) {
+export default function DeviceDetail({ deviceId, canWriteNotes = true, onClose }) {
   const { data, error } = usePolling(() => fetchDevice(deviceId), POLL_MS, [deviceId])
   const [points, setPoints] = useState([])
   const [thresholds, setThresholds] = useState(null)
@@ -146,7 +146,7 @@ export default function DeviceDetail({ deviceId, onClose }) {
         </div>
         {points.length === 0 && <div className="drawer-placeholder">Loading history…</div>}
 
-        <Notes deviceId={deviceId} />
+        <Notes deviceId={deviceId} canWrite={canWriteNotes} />
       </aside>
     </div>
   )

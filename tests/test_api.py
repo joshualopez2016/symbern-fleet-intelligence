@@ -266,8 +266,41 @@ def test_notes_are_user_scoped(admin, viewer, device_id):
         # viewer cannot see it
         vlist = requests.get(f"{BASE}/api/devices/{device_id}/notes", headers=viewer, timeout=15).json()
         assert all(n["id"] != note["id"] for n in vlist["notes"])
-        # viewer cannot edit it (scoped update -> 404)
+        # viewer is read-only -> write is forbidden by role
         vedit = requests.put(f"{BASE}/api/notes/{note['id']}", headers=viewer, json={"body": "hax"}, timeout=15)
-        assert vedit.status_code == 404
+        assert vedit.status_code == 403
     finally:
         requests.delete(f"{BASE}/api/notes/{note['id']}", headers=admin, timeout=15)
+
+
+# ---- role-based authorization ----------------------------------------------
+
+def test_viewer_cannot_write_notes(viewer, device_id):
+    r = requests.post(f"{BASE}/api/devices/{device_id}/notes", headers=viewer,
+                      json={"body": "nope"}, timeout=15)
+    assert r.status_code == 403
+
+
+def test_user_management_is_admin_only(viewer):
+    assert requests.get(f"{BASE}/api/users", headers=viewer, timeout=15).status_code == 403
+
+
+def test_admin_user_crud(admin):
+    assert requests.get(f"{BASE}/api/users", headers=admin, timeout=15).status_code == 200
+    email = f"temp_{uuid.uuid4().hex[:8]}@bms.local"
+    created = requests.post(f"{BASE}/api/users", headers=admin,
+                            json={"email": email, "password": "Temp#2026", "role": "engineer"}, timeout=15)
+    assert created.status_code == 200
+    uid = created.json()["id"]
+    try:
+        upd = requests.put(f"{BASE}/api/users/{uid}", headers=admin, json={"role": "supervisor"}, timeout=15)
+        assert upd.status_code == 200 and upd.json()["role"] == "supervisor"
+    finally:
+        assert requests.delete(f"{BASE}/api/users/{uid}", headers=admin, timeout=15).status_code == 200
+
+
+def test_admin_cannot_delete_self(admin):
+    users = requests.get(f"{BASE}/api/users", headers=admin, timeout=15).json()["users"]
+    me = requests.get(f"{BASE}/api/auth/me", headers=admin, timeout=15).json()
+    admin_id = next(u["id"] for u in users if u["email"] == me["email"])
+    assert requests.delete(f"{BASE}/api/users/{admin_id}", headers=admin, timeout=15).status_code == 400

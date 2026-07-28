@@ -22,8 +22,18 @@ Bearer <token>`); without it they return `401`. `/api/health` and
 - **GET /api/auth/me** — current user `{ "email", "role" }` (requires token).
 - **POST /api/auth/logout** — `{ "ok": true }` (stateless JWT; client discards token).
 
-Roles: `viewer | engineer | supervisor | administrator` (role-based gating is
-scaffolded via `require_role(...)` for future per-role restrictions).
+Roles: `viewer | engineer | supervisor | administrator`, **enforced** via
+`require_role(...)`:
+- **viewer** — read-only (cannot write notes → `403`)
+- **engineer / supervisor / administrator** — may create/edit/delete notes
+- **administrator** — may also manage users (below)
+
+## User management (administrator only)
+All return `403` for non-admins.
+- **GET /api/users** → `{ count, users: [{id, email, role, created_at, last_login_at}] }`
+- **POST /api/users** — `{ email, password, role }` → created user. `409` if email exists, `422` bad role.
+- **PUT /api/users/{id}** — `{ role }` → updated user. `404` if unknown.
+- **DELETE /api/users/{id}** → `{ deleted: id }`. `400` if deleting your own account, `404` if unknown.
 
 ## GET /api/config/thresholds
 The single source of truth for alert limits (same values the simulator alarms

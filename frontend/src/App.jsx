@@ -9,6 +9,7 @@ import AiPanel from './components/AiPanel'
 import DailyReport from './components/DailyReport'
 import FilterPanel from './components/FilterPanel'
 import QueryBuilder from './components/QueryBuilder'
+import UserAdmin from './components/UserAdmin'
 import Login from './components/Login'
 
 const POLL_MS = 3000
@@ -63,6 +64,9 @@ function Dashboard({ user, onLogout }) {
   const [aiConfigured, setAiConfigured] = useState(false)
   const [showReport, setShowReport] = useState(false)
   const [showQuery, setShowQuery] = useState(false)
+  const [showUsers, setShowUsers] = useState(false)
+  const isAdmin = user.role === 'administrator'
+  const canWriteNotes = ['engineer', 'supervisor', 'administrator'].includes(user.role)
   const [filters, setFilters] = useState(DEFAULT_FILTERS)
   const [filterOptions, setFilterOptions] = useState({ sites: [], companies: [], equipment: [] })
 
@@ -237,6 +241,7 @@ function Dashboard({ user, onLogout }) {
           <button className="pager-btn" onClick={() => exportFleet('xlsx', fleetParams)}>⬇ Excel</button>
           <button className="pager-btn" onClick={() => setShowReport(true)}>📄 Daily Report</button>
           <button className="pager-btn" onClick={() => setShowQuery(true)}>🔎 Query Builder</button>
+          {isAdmin && <button className="pager-btn" onClick={() => setShowUsers(true)}>👥 Users</button>}
           {!aiResult && matched > PAGE && (
             <>
               <button className="pager-btn" disabled={offset === 0} onClick={() => setOffset((o) => Math.max(0, o - PAGE))}>‹ Prev</button>
@@ -259,8 +264,9 @@ function Dashboard({ user, onLogout }) {
       </main>
 
       {selected && (
-        <DeviceDetail deviceId={selected} onClose={() => setSelected(null)} />
+        <DeviceDetail deviceId={selected} canWriteNotes={canWriteNotes} onClose={() => setSelected(null)} />
       )}
+      {showUsers && <UserAdmin me={user} onClose={() => setShowUsers(false)} />}
       {showReport && <DailyReport onClose={() => setShowReport(false)} />}
       {showQuery && <QueryBuilder onClose={() => setShowQuery(false)} />}
 

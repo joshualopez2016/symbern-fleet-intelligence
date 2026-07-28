@@ -194,6 +194,68 @@ def logout(user: dict = Depends(auth.require_user)) -> dict:
     return {"ok": True}
 
 
+# ---- User management (administrator only) ----------------------------------
+
+class NewUser(BaseModel):
+    email: str
+    password: str
+    role: str = "viewer"
+
+
+class RoleUpdate(BaseModel):
+    role: str
+
+
+@app.get("/api/users")
+def list_users(_admin: dict = Depends(auth.require_role("administrator"))) -> dict:
+    rows = query(
+        "SELECT id, email, role, created_at, last_login_at FROM users ORDER BY id"
+    )
+    return {"count": len(rows), "users": rows}
+
+
+@app.post("/api/users")
+def create_user_endpoint(body: NewUser,
+                         _admin: dict = Depends(auth.require_role("administrator"))) -> dict:
+    email = body.email.lower().strip()
+    if not email or not body.password:
+        raise HTTPException(422, "email and password are required")
+    if body.role not in auth.ROLES:
+        raise HTTPException(422, f"role must be one of {list(auth.ROLES)}")
+    if query_one("SELECT 1 FROM users WHERE email = %s", (email,)):
+        raise HTTPException(409, "a user with that email already exists")
+    return query_one(
+        "INSERT INTO users (email, password_hash, role) VALUES (%s, %s, %s) "
+        "RETURNING id, email, role, created_at",
+        (email, auth.hash_password(body.password), body.role),
+    )
+
+
+@app.put("/api/users/{user_id}")
+def update_user_role(user_id: int, body: RoleUpdate,
+                     _admin: dict = Depends(auth.require_role("administrator"))) -> dict:
+    if body.role not in auth.ROLES:
+        raise HTTPException(422, f"role must be one of {list(auth.ROLES)}")
+    row = query_one(
+        "UPDATE users SET role = %s WHERE id = %s RETURNING id, email, role",
+        (body.role, user_id),
+    )
+    if row is None:
+        raise HTTPException(404, "user not found")
+    return row
+
+
+@app.delete("/api/users/{user_id}")
+def delete_user_endpoint(user_id: int,
+                         admin: dict = Depends(auth.require_role("administrator"))) -> dict:
+    if user_id == admin["id"]:
+        raise HTTPException(400, "you cannot delete your own account")
+    row = query_one("DELETE FROM users WHERE id = %s RETURNING id", (user_id,))
+    if row is None:
+        raise HTTPException(404, "user not found")
+    return {"deleted": row["id"]}
+
+
 @app.get("/api/config/thresholds")
 def get_thresholds(_user: dict = Depends(auth.require_user)) -> dict:
     """Serve the SAME limits the simulator alarms on, so the UI colors match."""
@@ -540,7 +602,8 @@ def list_notes(device_id: str, user: dict = Depends(auth.require_user)) -> dict:
 
 
 @app.post("/api/devices/{device_id}/notes")
-def create_note(device_id: str, body: NoteBody, user: dict = Depends(auth.require_user)) -> dict:
+def create_note(device_id: str, body: NoteBody,
+                user: dict = Depends(auth.require_role("engineer", "supervisor", "administrator"))) -> dict:
     text = _clean_note(body.body)
     if query_one("SELECT 1 FROM devices WHERE device_id = %s", (device_id,)) is None:
         raise HTTPException(404, f"device {device_id!r} not found")
@@ -552,7 +615,8 @@ def create_note(device_id: str, body: NoteBody, user: dict = Depends(auth.requir
 
 
 @app.put("/api/notes/{note_id}")
-def update_note(note_id: int, body: NoteBody, user: dict = Depends(auth.require_user)) -> dict:
+def update_note(note_id: int, body: NoteBody,
+                user: dict = Depends(auth.require_role("engineer", "supervisor", "administrator"))) -> dict:
     text = _clean_note(body.body)
     row = query_one(
         "UPDATE notes SET body = %s, updated_at = now() WHERE id = %s AND user_id = %s "
@@ -565,7 +629,8 @@ def update_note(note_id: int, body: NoteBody, user: dict = Depends(auth.require_
 
 
 @app.delete("/api/notes/{note_id}")
-def delete_note(note_id: int, user: dict = Depends(auth.require_user)) -> dict:
+def delete_note(note_id: int,
+                user: dict = Depends(auth.require_role("engineer", "supervisor", "administrator"))) -> dict:
     row = query_one(
         "DELETE FROM notes WHERE id = %s AND user_id = %s RETURNING id",
         (note_id, user["id"]),

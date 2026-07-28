@@ -122,6 +122,19 @@ body {
 }
 .search:focus { border-color: var(--accent); }
 
+/* User admin */
+.user-add { display: flex; gap: 8px; margin-bottom: 14px; flex-wrap: wrap; }
+.user-add input, .user-add select {
+  background: var(--panel-2); border: 1px solid var(--border); color: var(--text);
+  padding: 8px 10px; border-radius: 8px; font: inherit; font-size: 13px; outline: none;
+}
+.user-add input:focus, .user-add select:focus { border-color: var(--accent); }
+.user-table select {
+  background: var(--panel-2); border: 1px solid var(--border); color: var(--text);
+  padding: 4px 8px; border-radius: 6px; font: inherit; font-size: 12px;
+}
+.user-table td { vertical-align: middle; }
+
 /* Query builder */
 .qb-modal {
   width: min(1000px, 96vw); max-height: 92vh; margin: auto; display: flex; flex-direction: column;

@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { listNotes, createNote, updateNote, deleteNote } from '../api'
 
 // Per-user notes on a pack — full CRUD (create / read / update / delete).
-export default function Notes({ deviceId }) {
+export default function Notes({ deviceId, canWrite = true }) {
   const [notes, setNotes] = useState([])
   const [draft, setDraft] = useState('')
   const [editingId, setEditingId] = useState(null)
@@ -76,15 +76,19 @@ export default function Notes({ deviceId }) {
       <h3 className="notes-title">Notes</h3>
       {error && <div className="banner banner-error">{error}</div>}
 
-      <form className="note-add" onSubmit={add}>
-        <textarea
-          value={draft}
-          onChange={(e) => setDraft(e.target.value)}
-          placeholder="Add a note about this pack…"
-          rows={2}
-        />
-        <button className="note-btn" disabled={busy || !draft.trim()}>Add</button>
-      </form>
+      {canWrite ? (
+        <form className="note-add" onSubmit={add}>
+          <textarea
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            placeholder="Add a note about this pack…"
+            rows={2}
+          />
+          <button className="note-btn" disabled={busy || !draft.trim()}>Add</button>
+        </form>
+      ) : (
+        <div className="notes-empty">Read-only — your role can’t add notes.</div>
+      )}
 
       {notes.length === 0 && <div className="notes-empty">No notes yet.</div>}
 
@@ -104,10 +108,12 @@ export default function Notes({ deviceId }) {
                 <div className="note-body">{n.body}</div>
                 <div className="note-meta">
                   <span>{new Date(n.updated_at).toLocaleString()}</span>
-                  <div className="note-actions">
-                    <button className="note-link" onClick={() => { setEditingId(n.id); setEditText(n.body) }}>Edit</button>
-                    <button className="note-link danger" onClick={() => remove(n.id)}>Delete</button>
-                  </div>
+                  {canWrite && (
+                    <div className="note-actions">
+                      <button className="note-link" onClick={() => { setEditingId(n.id); setEditText(n.body) }}>Edit</button>
+                      <button className="note-link danger" onClick={() => remove(n.id)}>Delete</button>
+                    </div>
+                  )}
                 </div>
               </>
             )}
