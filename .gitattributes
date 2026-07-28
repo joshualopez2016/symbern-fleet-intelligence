@@ -1,0 +1,8 @@
+# Normalize line endings so the repo stays consistent across machines
+# (developed on Windows, transferring to another laptop).
+* text=auto eol=lf
+
+# Binary-ish / lockfiles keep their bytes
+*.png binary
+*.jpg binary
+*.ico binary
