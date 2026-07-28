@@ -178,13 +178,26 @@ async function downloadFile(url, filename) {
   URL.revokeObjectURL(objUrl)
 }
 
-export function exportFleet(fmt, { status, site, q } = {}) {
+export function exportFleet(fmt, params = {}) {
   const p = new URLSearchParams()
-  if (status && status !== 'all') p.set('status', status)
-  if (site) p.set('site', site)
-  if (q) p.set('q', q)
+  for (const [k, v] of Object.entries(params)) {
+    if (v === undefined || v === null || v === '') continue
+    p.set(k, Array.isArray(v) ? v.join(',') : v)
+  }
   const qs = p.toString()
   return downloadFile(`/api/export/fleet.${fmt}${qs ? `?${qs}` : ''}`, `fleet.${fmt}`)
+}
+
+export function fetchFilterOptions() {
+  return getJSON('/api/fleet/filter-options')
+}
+
+// --- query builder ---
+export function querySources() {
+  return getJSON('/api/query/sources')
+}
+export function queryRun(spec) {
+  return sendJSON('POST', '/api/query/run', spec)
 }
 
 export function exportDailyReport(fmt, date) {

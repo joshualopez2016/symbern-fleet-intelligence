@@ -100,6 +100,32 @@ def test_fleet_pagination_bounded(admin):
     assert len(r.json()["devices"]) <= 5
 
 
+def test_filter_options(admin):
+    r = requests.get(f"{BASE}/api/fleet/filter-options", headers=admin, timeout=15)
+    assert r.status_code == 200
+    b = r.json()
+    for k in ("sites", "companies", "equipment"):
+        assert isinstance(b[k], list) and b[k]
+
+
+def test_fleet_multi_status(admin):
+    r = requests.get(f"{BASE}/api/fleet?statuses=warning,critical&limit=200", headers=admin, timeout=15)
+    assert r.status_code == 200
+    assert all(d["status"] in ("warning", "critical") for d in r.json()["devices"])
+
+
+def test_fleet_soc_range(admin):
+    r = requests.get(f"{BASE}/api/fleet?soc_min=0&soc_max=25&limit=200", headers=admin, timeout=15)
+    assert r.status_code == 200
+    assert all(0 <= d["soc"] <= 25 for d in r.json()["devices"])
+
+
+def test_fleet_has_alarms(admin):
+    r = requests.get(f"{BASE}/api/fleet?has_alarms=true&limit=200", headers=admin, timeout=15)
+    assert r.status_code == 200
+    assert all(d["active_alarms"] > 0 for d in r.json()["devices"])
+
+
 # ---- devices & readings ----------------------------------------------------
 
 def test_device_detail(admin, device_id):
@@ -142,6 +168,52 @@ def test_ai_status(admin):
 
 def test_ai_search_requires_auth():
     r = requests.post(f"{BASE}/api/ai/search", json={"query": "x"}, timeout=15)
+    assert r.status_code == 401
+
+
+# ---- query builder ---------------------------------------------------------
+
+def test_query_sources(admin):
+    r = requests.get(f"{BASE}/api/query/sources", headers=admin, timeout=15)
+    assert r.status_code == 200
+    assert "fleet" in r.json()
+
+
+def test_query_run_parameterized(admin):
+    spec = {
+        "source": "fleet",
+        "columns": ["device_id", "soc", "status"],
+        "filters": [{"field": "soc", "op": "lt", "value": 30}],
+        "sort": {"field": "soc", "dir": "asc"},
+        "limit": 10,
+    }
+    r = requests.post(f"{BASE}/api/query/run", headers=admin, json=spec, timeout=15)
+    assert r.status_code == 200
+    b = r.json()
+    assert all(row["soc"] < 30 for row in b["rows"])
+    assert "%s" in b["sql"]  # values are bound, not inlined
+
+
+def test_query_rejects_unknown_field(admin):
+    spec = {"source": "fleet", "filters": [{"field": "soc); DROP TABLE devices;--", "op": "eq", "value": 1}]}
+    r = requests.post(f"{BASE}/api/query/run", headers=admin, json=spec, timeout=15)
+    assert r.status_code == 422
+
+
+def test_query_injection_in_value_is_safe(admin):
+    spec = {
+        "source": "fleet",
+        "columns": ["device_id"],
+        "filters": [{"field": "company", "op": "eq", "value": "x'); DROP TABLE devices;--"}],
+    }
+    r = requests.post(f"{BASE}/api/query/run", headers=admin, json=spec, timeout=15)
+    assert r.status_code == 200
+    assert r.json()["count"] == 0
+    assert requests.get(f"{BASE}/api/fleet/summary", headers=admin, timeout=15).json()["total"] > 0
+
+
+def test_query_requires_auth():
+    r = requests.post(f"{BASE}/api/query/run", json={"source": "fleet"}, timeout=15)
     assert r.status_code == 401
 
 

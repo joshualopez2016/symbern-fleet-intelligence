@@ -21,7 +21,7 @@ from fastapi import Depends, FastAPI, HTTPException, Query, Response
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-from . import ai, auth, exports
+from . import ai, auth, exports, querybuilder
 from .db import pool, query, query_one
 
 import sys
@@ -112,42 +112,83 @@ def get_fleet_summary(_user: dict = Depends(auth.require_user)) -> dict:
     return row
 
 
+def _split(v: Optional[str]) -> list[str]:
+    return [x.strip() for x in v.split(",") if x.strip()] if v else []
+
+
+def _fleet_where(*, status=None, statuses=None, sites=None, companies=None,
+                 equipment=None, soc_min=None, soc_max=None, has_alarms=False,
+                 q=None, since=None):
+    """Build the parameterized WHERE for a fleet query. Shared by the grid and
+    the exports so both honor the same advanced filters. Returns (sql, params)."""
+    where, params = [], []
+    st = [s for s in (_split(statuses) or ([status] if status else [])) if s in VALID_STATUS]
+    if st:
+        where.append(f"s.status IN ({','.join(['%s'] * len(st))})")
+        params += st
+    for col, vals in (("d.site", _split(sites)), ("d.company", _split(companies)),
+                      ("d.equipment", _split(equipment))):
+        if vals:
+            where.append(f"{col} IN ({','.join(['%s'] * len(vals))})")
+            params += vals
+    if soc_min is not None:
+        where.append("s.soc >= %s")
+        params.append(soc_min)
+    if soc_max is not None:
+        where.append("s.soc <= %s")
+        params.append(soc_max)
+    if has_alarms:
+        where.append("s.active_alarms > 0")
+    if q:
+        where.append("(s.device_id ILIKE %s OR d.label ILIKE %s)")
+        params += [f"%{q}%", f"%{q}%"]
+    if since is not None:
+        where.append("s.ts > %s")
+        params.append(since)
+    return (("WHERE " + " AND ".join(where)) if where else ""), params
+
+
+@app.get("/api/fleet/filter-options")
+def fleet_filter_options(_user: dict = Depends(auth.require_user)) -> dict:
+    """Distinct values for the advanced-filter dropdowns."""
+    return {
+        "sites": [r["site"] for r in query("SELECT DISTINCT site FROM devices ORDER BY site")],
+        "companies": [r["company"] for r in query("SELECT DISTINCT company FROM devices ORDER BY company")],
+        "equipment": [r["equipment"] for r in query("SELECT DISTINCT equipment FROM devices ORDER BY equipment")],
+    }
+
+
 @app.get("/api/fleet")
 def get_fleet(
-    status: Optional[str] = Query(None, description="ok | warning | critical"),
-    site: Optional[str] = None,
+    status: Optional[str] = Query(None, description="single status (stat pills)"),
+    statuses: Optional[str] = Query(None, description="comma list: ok,warning,critical"),
+    sites: Optional[str] = Query(None, description="comma list of sites"),
+    companies: Optional[str] = Query(None, description="comma list of companies"),
+    equipment: Optional[str] = Query(None, description="comma list of equipment"),
+    soc_min: Optional[float] = Query(None, ge=0, le=100),
+    soc_max: Optional[float] = Query(None, ge=0, le=100),
+    has_alarms: bool = Query(False, description="only packs with active alarms"),
     q: Optional[str] = Query(None, description="search device_id / label"),
     since: Optional[datetime] = Query(None, description="only devices updated after this ts (delta poll)"),
     limit: int = Query(500, ge=1, le=MAX_FLEET),
     offset: int = Query(0, ge=0),
     _user: dict = Depends(auth.require_user),
 ) -> dict:
-    """Fleet grid — reads ONLY device_status (one row/device), joined to devices
-    for label/site/model. Never scans the readings time-series."""
+    """Fleet grid — reads ONLY device_status (one row/device), joined to devices.
+    Supports multi-select status/site/company/equipment, an SoC range, an
+    active-alarms toggle, search, and delta polling. Never scans readings."""
     if status is not None and status not in VALID_STATUS:
         raise HTTPException(422, f"invalid status; expected one of {sorted(VALID_STATUS)}")
 
-    where = []
-    params: list = []
-    if status is not None:
-        where.append("s.status = %s")
-        params.append(status)
-    if site is not None:
-        where.append("d.site = %s")
-        params.append(site)
-    if q is not None:
-        where.append("(s.device_id ILIKE %s OR d.label ILIKE %s)")
-        params.extend([f"%{q}%", f"%{q}%"])
-    if since is not None:
-        where.append("s.ts > %s")
-        params.append(since)
-    where_sql = ("WHERE " + " AND ".join(where)) if where else ""
-
+    where_sql, params = _fleet_where(
+        status=status, statuses=statuses, sites=sites, companies=companies,
+        equipment=equipment, soc_min=soc_min, soc_max=soc_max,
+        has_alarms=has_alarms, q=q, since=since,
+    )
     total = query_one(
         f"SELECT count(*) AS n FROM device_status s JOIN devices d USING (device_id) {where_sql}",
         tuple(params),
     )["n"]
-
     rows = query(
         f"""
         SELECT s.device_id, d.label, d.model, d.site,
@@ -438,18 +479,8 @@ FLEET_EXPORT_COLS = [
 XLSX_MEDIA = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 
 
-def _fleet_export_rows(status, site, q):
-    where, params = [], []
-    if status in VALID_STATUS:
-        where.append("s.status = %s")
-        params.append(status)
-    if site:
-        where.append("d.site = %s")
-        params.append(site)
-    if q:
-        where.append("(s.device_id ILIKE %s OR d.label ILIKE %s)")
-        params.extend([f"%{q}%", f"%{q}%"])
-    where_sql = ("WHERE " + " AND ".join(where)) if where else ""
+def _fleet_export_rows(**filters):
+    where_sql, params = _fleet_where(**filters)
     return query(
         f"""
         SELECT s.device_id, d.label, d.model, d.site, d.company, d.equipment,
@@ -499,7 +530,13 @@ def daily_report(date: Optional[str] = None, _user: dict = Depends(auth.require_
 def export_fleet(
     fmt: str,
     status: Optional[str] = None,
-    site: Optional[str] = None,
+    statuses: Optional[str] = None,
+    sites: Optional[str] = None,
+    companies: Optional[str] = None,
+    equipment: Optional[str] = None,
+    soc_min: Optional[float] = None,
+    soc_max: Optional[float] = None,
+    has_alarms: bool = False,
     q: Optional[str] = None,
     _user: dict = Depends(auth.require_user),
 ):
@@ -507,8 +544,34 @@ def export_fleet(
         raise HTTPException(404, "format must be csv or xlsx")
     if status is not None and status not in VALID_STATUS:
         raise HTTPException(422, f"invalid status; expected one of {sorted(VALID_STATUS)}")
-    rows = _fleet_export_rows(status, site, q)
+    rows = _fleet_export_rows(
+        status=status, statuses=statuses, sites=sites, companies=companies,
+        equipment=equipment, soc_min=soc_min, soc_max=soc_max, has_alarms=has_alarms, q=q,
+    )
     return _export_response(fmt, FLEET_EXPORT_COLS, rows, "fleet")
+
+
+@app.get("/api/query/sources")
+def query_sources(_user: dict = Depends(auth.require_user)) -> dict:
+    """Field-mapping registry for the no-code query builder."""
+    return querybuilder.sources_schema()
+
+
+class QuerySpec(BaseModel):
+    source: str
+    columns: Optional[list] = None
+    filters: Optional[list] = None
+    sort: Optional[dict] = None
+    limit: Optional[int] = None
+
+
+@app.post("/api/query/run")
+def query_run(spec: QuerySpec, _user: dict = Depends(auth.require_user)) -> dict:
+    """Run a structured query -> parameterized SQL. Users never write SQL."""
+    try:
+        return querybuilder.build_and_run(spec.model_dump())
+    except querybuilder.QBError as e:
+        raise HTTPException(422, str(e))
 
 
 @app.get("/api/export/daily-report.{fmt}")

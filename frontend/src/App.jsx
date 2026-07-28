@@ -1,15 +1,18 @@
 import { useEffect, useState } from 'react'
-import { fetchFleet, fetchFleetSummary, fetchMe, logout, getAuthToken, aiStatus, exportFleet } from './api'
+import { fetchFleet, fetchFleetSummary, fetchMe, logout, getAuthToken, aiStatus, exportFleet, fetchFilterOptions } from './api'
 import { usePolling } from './usePolling'
 import FleetGrid from './components/FleetGrid'
 import DeviceDetail from './components/DeviceDetail'
 import AlertsPanel from './components/AlertsPanel'
 import AiPanel from './components/AiPanel'
 import DailyReport from './components/DailyReport'
+import FilterPanel from './components/FilterPanel'
+import QueryBuilder from './components/QueryBuilder'
 import Login from './components/Login'
 
 const POLL_MS = 3000
 const PAGE = 200 // bounded worst-first page — response size stays flat as the fleet grows
+const DEFAULT_FILTERS = { sites: [], companies: [], equipment: [], socMin: '', socMax: '', hasAlarms: false }
 
 export default function App() {
   const [user, setUser] = useState(null)
@@ -58,6 +61,9 @@ function Dashboard({ user, onLogout }) {
   const [aiResult, setAiResult] = useState(null)
   const [aiConfigured, setAiConfigured] = useState(false)
   const [showReport, setShowReport] = useState(false)
+  const [showQuery, setShowQuery] = useState(false)
+  const [filters, setFilters] = useState(DEFAULT_FILTERS)
+  const [filterOptions, setFilterOptions] = useState({ sites: [], companies: [], equipment: [] })
 
   // debounce the search box so typing doesn't fire a request per keystroke
   useEffect(() => {
@@ -69,11 +75,24 @@ function Dashboard({ user, onLogout }) {
   useEffect(() => {
     setOffset(0)
     setAiResult(null)
-  }, [statusFilter, debouncedSearch])
+  }, [statusFilter, debouncedSearch, filters])
 
   useEffect(() => {
     aiStatus().then((s) => setAiConfigured(s.configured)).catch(() => {})
+    fetchFilterOptions().then(setFilterOptions).catch(() => {})
   }, [])
+
+  // Shared filter params for both the grid fetch and the exports.
+  const fleetParams = {
+    status: statusFilter === 'all' ? undefined : statusFilter,
+    sites: filters.sites.length ? filters.sites.join(',') : undefined,
+    companies: filters.companies.length ? filters.companies.join(',') : undefined,
+    equipment: filters.equipment.length ? filters.equipment.join(',') : undefined,
+    soc_min: filters.socMin !== '' ? filters.socMin : undefined,
+    soc_max: filters.socMax !== '' ? filters.socMax : undefined,
+    has_alarms: filters.hasAlarms ? 'true' : undefined,
+    q: debouncedSearch || undefined,
+  }
 
   // Whole-fleet tallies — one cheap aggregate, independent of paging.
   const { data: summary } = usePolling(fetchFleetSummary, POLL_MS, [])
@@ -81,15 +100,9 @@ function Dashboard({ user, onLogout }) {
   // The grid page — server does the filtering, worst-first sort, and pagination,
   // so the payload is capped at PAGE rows no matter how large the fleet is.
   const { data: fleet, error, loading } = usePolling(
-    () =>
-      fetchFleet({
-        status: statusFilter === 'all' ? undefined : statusFilter,
-        q: debouncedSearch || undefined,
-        limit: PAGE,
-        offset,
-      }),
+    () => fetchFleet({ ...fleetParams, limit: PAGE, offset }),
     POLL_MS,
-    [statusFilter, debouncedSearch, offset],
+    [statusFilter, debouncedSearch, offset, filters],
   )
 
   const devices = fleet?.devices ?? []
@@ -115,10 +128,10 @@ function Dashboard({ user, onLogout }) {
     <div className="app">
       <header className="topbar">
         <div className="brand">
-          <span className="brand-mark">⚡</span>
+          <span className="brand-mark">S</span>
           <div>
-            <h1>BMS Fleet Dashboard</h1>
-            <p className="subtitle">Battery telemetry · live monitoring</p>
+            <h1>Symbern <span className="brand-tag">Fleet Intelligence</span></h1>
+            <p className="subtitle">Turning fleet data into live decisions</p>
           </div>
         </div>
         <div className="topbar-status">
@@ -163,6 +176,13 @@ function Dashboard({ user, onLogout }) {
         </div>
       </section>
 
+      <FilterPanel
+        options={filterOptions}
+        value={filters}
+        onChange={setFilters}
+        onClear={() => setFilters(DEFAULT_FILTERS)}
+      />
+
       <AiPanel
         configured={aiConfigured}
         active={!!aiResult}
@@ -188,9 +208,10 @@ function Dashboard({ user, onLogout }) {
           <span />
         )}
         <div className="fleet-actions">
-          <button className="pager-btn" onClick={() => exportFleet('csv', { status: statusFilter, q: debouncedSearch })}>⬇ CSV</button>
-          <button className="pager-btn" onClick={() => exportFleet('xlsx', { status: statusFilter, q: debouncedSearch })}>⬇ Excel</button>
+          <button className="pager-btn" onClick={() => exportFleet('csv', fleetParams)}>⬇ CSV</button>
+          <button className="pager-btn" onClick={() => exportFleet('xlsx', fleetParams)}>⬇ Excel</button>
           <button className="pager-btn" onClick={() => setShowReport(true)}>📄 Daily Report</button>
+          <button className="pager-btn" onClick={() => setShowQuery(true)}>🔎 Query Builder</button>
           {!aiResult && matched > PAGE && (
             <>
               <button className="pager-btn" disabled={offset === 0} onClick={() => setOffset((o) => Math.max(0, o - PAGE))}>‹ Prev</button>
@@ -216,6 +237,12 @@ function Dashboard({ user, onLogout }) {
         <DeviceDetail deviceId={selected} onClose={() => setSelected(null)} />
       )}
       {showReport && <DailyReport onClose={() => setShowReport(false)} />}
+      {showQuery && <QueryBuilder onClose={() => setShowQuery(false)} />}
+
+      <footer className="app-footer">
+        <span className="foot-brand">Symbern</span> — Batteries. Equipment. Intelligence.
+        <span className="foot-sep">·</span> We power modern logistics.
+      </footer>
     </div>
   )
 }

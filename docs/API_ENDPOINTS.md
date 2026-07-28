@@ -53,12 +53,20 @@ SoC.
 
 | Query param | Type | Default | Notes |
 |---|---|---|---|
-| `status` | `ok`\|`warning`\|`critical` | — | filter by current status |
-| `site` | string | — | filter by depot/location |
+| `status` | `ok`\|`warning`\|`critical` | — | single status (stat pills) |
+| `statuses` | comma list | — | multi-select status (e.g. `warning,critical`) |
+| `sites` | comma list | — | multi-select site |
+| `companies` | comma list | — | multi-select company |
+| `equipment` | comma list | — | multi-select equipment |
+| `soc_min` / `soc_max` | number 0–100 | — | state-of-charge range |
+| `has_alarms` | bool | false | only packs with active alarms |
 | `q` | string | — | search `device_id` / `label` (ILIKE) |
 | `since` | ISO timestamp | — | **delta poll**: only devices updated after this ts |
-| `limit` | int 1–5000 | 500 | pagination |
-| `offset` | int ≥0 | 0 | pagination |
+| `limit` / `offset` | int | 500 / 0 | pagination |
+
+**GET /api/fleet/filter-options** → `{ "sites": [...], "companies": [...], "equipment": [...] }`
+(distinct values for the filter dropdowns). The same filter params above apply to
+`GET /api/export/fleet.{csv,xlsx}`, so exports honor the active filters.
 
 ```json
 { "total": 24, "count": 3, "devices": [

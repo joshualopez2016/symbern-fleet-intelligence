@@ -26,12 +26,13 @@ export default function Login({ onLogin }) {
     <div className="login-screen">
       <form className="login-card" onSubmit={submit}>
         <div className="login-brand">
-          <span className="brand-mark">⚡</span>
+          <span className="brand-mark">S</span>
           <div>
-            <h1>BMS Fleet Dashboard</h1>
-            <p className="subtitle">Sign in to continue</p>
+            <h1>Symbern</h1>
+            <p className="subtitle">Fleet Battery Intelligence</p>
           </div>
         </div>
+        <p className="login-slogan">We power modern logistics — sign in to continue.</p>
 
         {error && <div className="banner banner-error">{error}</div>}
 

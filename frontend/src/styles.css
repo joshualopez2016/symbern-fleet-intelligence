@@ -1,17 +1,19 @@
 :root {
-  --bg: #0e1116;
-  --panel: #171b22;
-  --panel-2: #1e232c;
-  --border: #2a3039;
-  --text: #e6e9ef;
-  --muted: #8b95a5;
+  /* Symbern brand palette (slate + sky blue + coral) */
+  --bg: #0b1220;
+  --panel: #141d2e;
+  --panel-2: #1e293b;   /* Symbern slate-800 */
+  --border: #2a3852;
+  --text: #e2e8f0;      /* slate-200 */
+  --muted: #94a3b8;     /* Symbern slate-400 */
   --ok: #2ecc71;
-  --ok-dim: #1c3a2b;
+  --ok-dim: #133024;
   --warn: #f4b740;
   --warn-dim: #3a3016;
   --crit: #ff5c5c;
   --crit-dim: #3a1c1e;
-  --accent: #4aa8ff;
+  --accent: #0ea5e9;    /* Symbern sky blue */
+  --accent-2: #f49463;  /* Symbern coral */
 }
 
 * { box-sizing: border-box; }
@@ -32,9 +34,21 @@ body {
 }
 .brand { display: flex; align-items: center; gap: 14px; }
 .brand-mark {
-  font-size: 26px; background: var(--panel-2); border: 1px solid var(--border);
+  font-size: 22px; font-weight: 800; color: #fff; letter-spacing: -.02em;
+  background: linear-gradient(135deg, var(--accent), #0369a1);
   width: 46px; height: 46px; display: grid; place-items: center; border-radius: 12px;
+  box-shadow: 0 4px 14px rgba(14, 165, 233, .3);
 }
+.brand h1 { display: flex; align-items: baseline; gap: 8px; }
+.brand-tag { font-size: 11px; font-weight: 600; color: var(--accent-2); text-transform: uppercase; letter-spacing: .06em; }
+
+/* Footer */
+.app-footer {
+  margin-top: 30px; padding: 16px 0; border-top: 1px solid var(--border);
+  color: var(--muted); font-size: 12px; text-align: center;
+}
+.foot-brand { color: var(--accent); font-weight: 700; }
+.foot-sep { margin: 0 8px; opacity: .5; }
 .topbar h1 { font-size: 20px; margin: 0; }
 .subtitle { margin: 2px 0 0; color: var(--muted); font-size: 13px; }
 .topbar-status { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; }
@@ -61,7 +75,8 @@ body {
   border-radius: 16px; padding: 28px; display: flex; flex-direction: column; gap: 16px;
 }
 .login-brand { display: flex; align-items: center; gap: 12px; margin-bottom: 4px; }
-.login-brand h1 { font-size: 18px; margin: 0; }
+.login-brand h1 { font-size: 20px; margin: 0; }
+.login-slogan { color: var(--muted); font-size: 13px; margin: -4px 0 4px; }
 .field { display: flex; flex-direction: column; gap: 6px; }
 .field span { font-size: 13px; color: var(--muted); }
 .field input {
@@ -105,6 +120,61 @@ body {
   padding: 10px 14px; border-radius: 10px; min-width: 240px; font-size: 14px; outline: none;
 }
 .search:focus { border-color: var(--accent); }
+
+/* Query builder */
+.qb-modal {
+  width: min(1000px, 96vw); max-height: 92vh; margin: auto; display: flex; flex-direction: column;
+  background: var(--panel); border: 1px solid var(--border); border-radius: 14px; padding: 20px; overflow: hidden;
+}
+.qb-body { overflow-y: auto; display: flex; flex-direction: column; gap: 16px; }
+.qb-controls { display: flex; flex-direction: column; gap: 14px; }
+.qb-row { display: flex; flex-direction: column; gap: 6px; }
+.qb-label { font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
+.qb-modal select, .qb-modal input {
+  background: var(--panel-2); border: 1px solid var(--border); color: var(--text);
+  padding: 8px 10px; border-radius: 8px; font: inherit; font-size: 13px; outline: none;
+}
+.qb-modal select:focus, .qb-modal input:focus { border-color: var(--accent); }
+.qb-section { border: 1px solid var(--border); border-radius: 10px; padding: 12px; }
+.qb-section-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; font-weight: 600; font-size: 13px; }
+.qb-hint { color: var(--muted); font-size: 12px; }
+.qb-filter { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; flex-wrap: wrap; }
+.qb-filter select, .qb-filter input { flex: 0 1 auto; }
+.qb-x { background: none; border: 1px solid var(--border); color: var(--muted); border-radius: 6px; cursor: pointer; width: 28px; height: 28px; font-size: 16px; }
+.qb-x:hover { border-color: var(--crit); color: var(--crit); }
+.qb-cols { flex-direction: row; flex-wrap: wrap; gap: 6px 16px; }
+.qb-inline { flex-direction: row; align-items: flex-end; gap: 14px; flex-wrap: wrap; }
+.qb-inline > div { display: flex; flex-direction: column; gap: 6px; }
+.qb-limit { width: 90px; }
+.qb-result { margin-top: 4px; }
+.qb-result-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; color: var(--muted); font-size: 13px; }
+.qb-sql {
+  background: #0b0e13; border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px;
+  font-family: ui-monospace, monospace; font-size: 12px; color: #9ecbff; overflow-x: auto; white-space: pre-wrap; margin: 0 0 12px;
+}
+
+/* Filter panel */
+.filter-panel { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; margin-bottom: 16px; overflow: hidden; }
+.filter-panel.has-active { border-color: var(--accent); }
+.filter-toggle {
+  width: 100%; display: flex; justify-content: space-between; align-items: center;
+  background: none; border: none; color: var(--text); cursor: pointer; padding: 12px 16px; font: inherit; font-weight: 600; font-size: 14px;
+}
+.filter-body {
+  border-top: 1px solid var(--border); padding: 16px;
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 18px; align-items: start;
+}
+.filter-group-title { font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin-bottom: 8px; }
+.filter-checks { display: flex; flex-direction: column; gap: 6px; }
+.filter-check { display: flex; align-items: center; gap: 8px; font-size: 13px; cursor: pointer; }
+.filter-check input { accent-color: var(--accent); width: 15px; height: 15px; }
+.filter-range { display: flex; align-items: center; gap: 8px; }
+.filter-range input {
+  width: 70px; background: var(--panel-2); border: 1px solid var(--border); color: var(--text);
+  padding: 7px 9px; border-radius: 8px; font: inherit; font-size: 13px; outline: none;
+}
+.filter-range input:focus { border-color: var(--accent); }
+.filter-body > .pager-btn { align-self: end; }
 
 /* AI panel */
 .ai-panel { margin-bottom: 16px; }
